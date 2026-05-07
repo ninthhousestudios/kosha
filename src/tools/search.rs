@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use crate::embed::Embedder;
+use crate::embed::EmbedProvider;
 use crate::error::{KoshaError, Result};
 use crate::store;
 
@@ -40,13 +38,13 @@ pub struct Citation {
 
 pub async fn handle(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &dyn EmbedProvider,
     args: SearchArgs,
 ) -> Result<SearchOutput> {
     let limit = args.limit.unwrap_or(5).clamp(1, 20);
 
     let query_embedding = embedder
-        .embed_one_async(args.query.clone())
+        .embed_one(args.query.clone())
         .await
         .map_err(|e| KoshaError::Embed(e.to_string()))?;
 

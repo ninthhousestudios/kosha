@@ -5,7 +5,13 @@ use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
-use kosha::{chunk::ChunkConfig, config::Config, db, embed::Embedder, mcp::KoshaServer};
+use kosha::{
+    chunk::ChunkConfig,
+    config::Config,
+    db,
+    embed::{EmbedProvider, HttpEmbedder, LocalEmbedder},
+    mcp::KoshaServer,
+};
 
 /// kosha: document intelligence MCP server.
 #[derive(Debug, Parser)]
@@ -55,9 +61,7 @@ async fn run_serve(cfg: Config) -> Result<()> {
         .await
         .context("running migrations")?;
 
-    tracing::info!(repo = %cfg.model_repo, "loading embedding model");
-    let embedder = load_embedder(&cfg.model_repo).await?;
-    let embedder = Arc::new(embedder);
+    let embedder = build_embedder(&cfg).await?;
 
     let server = KoshaServer::new(pool, embedder);
     let service = server.serve(stdio()).await.context("starting MCP server")?;
@@ -80,9 +84,7 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
         .await
         .context("running migrations")?;
 
-    tracing::info!(repo = %cfg.model_repo, "loading embedding model");
-    let embedder = load_embedder(&cfg.model_repo).await?;
-    let embedder = Arc::new(embedder);
+    let embedder = build_embedder(&cfg).await?;
 
     let chunk_cfg = ChunkConfig {
         max_tokens: cfg.chunk_max_tokens,
@@ -90,7 +92,7 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     };
 
     let file_path = std::path::Path::new(&path);
-    let result = kosha::ingest::ingest_file(&pool, &embedder, file_path, &chunk_cfg).await?;
+    let result = kosha::ingest::ingest_file(&pool, embedder.as_ref(), file_path, &chunk_cfg).await?;
 
     if result.skipped {
         eprintln!("kosha: already ingested (hash {})", result.content_hash);
@@ -104,12 +106,41 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     Ok(())
 }
 
-async fn load_embedder(repo: &str) -> Result<Embedder> {
-    let repo = repo.to_string();
-    tokio::task::spawn_blocking(move || Embedder::load(&repo))
-        .await
-        .context("join error")?
-        .context("loading embedder")
+async fn build_embedder(cfg: &Config) -> Result<Arc<dyn EmbedProvider>> {
+    match cfg.embed_provider.as_str() {
+        "local" => {
+            let repo = cfg.model_repo.clone();
+            let dim = cfg.embed_dimension;
+            tracing::info!(%repo, dim, "loading local embedding model");
+            let embedder = tokio::task::spawn_blocking(move || LocalEmbedder::load(&repo, dim))
+                .await
+                .context("join error")?
+                .context("loading local embedder")?;
+            Ok(Arc::new(embedder))
+        }
+        "http" => {
+            let url = cfg
+                .embed_url
+                .as_ref()
+                .context("KOSHA_EMBED_URL required when KOSHA_EMBED_PROVIDER=http")?
+                .clone();
+            let model = cfg
+                .embed_model
+                .as_ref()
+                .context("KOSHA_EMBED_MODEL required when KOSHA_EMBED_PROVIDER=http")?
+                .clone();
+            tracing::info!(%url, %model, dim = cfg.embed_dimension, "using HTTP embedding provider");
+            let embedder = HttpEmbedder::new(
+                url,
+                model,
+                cfg.embed_dimension,
+                cfg.embed_api_key.clone(),
+                cfg.embed_batch_size,
+            );
+            Ok(Arc::new(embedder))
+        }
+        other => anyhow::bail!("unknown KOSHA_EMBED_PROVIDER: {other} (expected \"local\" or \"http\")"),
+    }
 }
 
 #[cfg(unix)]

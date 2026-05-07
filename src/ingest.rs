@@ -1,12 +1,11 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use sqlx::PgPool;
 
 use crate::chunk::{self, ChunkConfig};
 use crate::decompose::Decomposer;
 use crate::decompose::plain_text::PlainTextDecomposer;
-use crate::embed::Embedder;
+use crate::embed::EmbedProvider;
 use crate::store;
 
 #[derive(Debug)]
@@ -20,7 +19,7 @@ pub struct IngestResult {
 
 pub async fn ingest_file(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &dyn EmbedProvider,
     path: &Path,
     chunk_cfg: &ChunkConfig,
 ) -> anyhow::Result<IngestResult> {
@@ -83,7 +82,7 @@ pub async fn ingest_file(
 
 async fn ingest_segments(
     pool: &PgPool,
-    embedder: &Arc<Embedder>,
+    embedder: &dyn EmbedProvider,
     content_hash: &str,
     segments: &[crate::decompose::Segment],
     chunk_cfg: &ChunkConfig,
@@ -103,7 +102,7 @@ async fn ingest_segments(
         let chunks = chunk::chunk_segment(&seg.content, &seg.label, chunk_cfg);
 
         let chunk_texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-        let embeddings = embedder.embed_batch_async(chunk_texts).await?;
+        let embeddings = embedder.embed_batch(chunk_texts).await?;
 
         for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
             store::insert_chunk(
@@ -115,6 +114,9 @@ async fn ingest_segments(
                 &ch.label,
                 &ch.content,
                 emb,
+                embedder.provider_name(),
+                embedder.model_name(),
+                embedder.dimension() as i32,
             )
             .await?;
             total_chunks += 1;

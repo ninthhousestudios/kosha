@@ -113,12 +113,15 @@ pub async fn insert_chunk(
     chunk_label: &str,
     content_text: &str,
     embedding: &[f32],
+    embed_provider: &str,
+    embed_model: &str,
+    embed_dimension: i32,
 ) -> Result<()> {
     let id = Uuid::now_v7();
     let hv = f32_to_halfvec(embedding);
     sqlx::query(
-        "INSERT INTO chunks (id, segment_id, chunk_index, leaf_id, segment_index, chunk_label, content_text, embedding)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "INSERT INTO chunks (id, segment_id, chunk_index, leaf_id, segment_index, chunk_label, content_text, embedding, embed_provider, embed_model, embed_dimension)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (segment_id, chunk_index) DO NOTHING",
     )
     .bind(id)
@@ -129,6 +132,9 @@ pub async fn insert_chunk(
     .bind(chunk_label)
     .bind(content_text)
     .bind(hv)
+    .bind(embed_provider)
+    .bind(embed_model)
+    .bind(embed_dimension)
     .execute(pool)
     .await?;
     Ok(())

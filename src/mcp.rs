@@ -8,19 +8,19 @@ use rmcp::{
 };
 use sqlx::PgPool;
 
-use crate::embed::Embedder;
+use crate::embed::EmbedProvider;
 use crate::error::KoshaError;
 use crate::tools;
 
 #[derive(Clone)]
 pub struct KoshaServer {
     pool: PgPool,
-    embedder: Arc<Embedder>,
+    embedder: Arc<dyn EmbedProvider>,
     tool_router: ToolRouter<Self>,
 }
 
 impl KoshaServer {
-    pub fn new(pool: PgPool, embedder: Arc<Embedder>) -> Self {
+    pub fn new(pool: PgPool, embedder: Arc<dyn EmbedProvider>) -> Self {
         Self {
             pool,
             embedder,
@@ -49,7 +49,7 @@ impl KoshaServer {
         &self,
         Parameters(args): Parameters<tools::SearchArgs>,
     ) -> Result<String, ErrorData> {
-        let out = tools::search::handle(&self.pool, &self.embedder, args)
+        let out = tools::search::handle(&self.pool, &*self.embedder, args)
             .await
             .map_err(kosha_to_rmcp)?;
         serde_json::to_string(&out).map_err(json_to_rmcp)
