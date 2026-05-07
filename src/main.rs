@@ -27,12 +27,16 @@ enum Commands {
     Serve,
     /// Ingest documents into the database.
     Ingest {
-        /// Path to a file or directory to ingest.
-        path: String,
-        /// Collection to assign the leaf to.
+        /// Files or directories to ingest.
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<String>,
+        /// Recurse into directories.
+        #[arg(short, long)]
+        recursive: bool,
+        /// Collection to assign leaves to.
         #[arg(long, default_value = "default")]
         collection: String,
-        /// Tags to attach to the leaf (repeatable).
+        /// Tags to attach to leaves (repeatable).
         #[arg(long = "tag", num_args = 1)]
         tags: Vec<String>,
     },
@@ -55,8 +59,8 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Serve) {
         Commands::Serve => run_serve(cfg).await,
-        Commands::Ingest { path, collection, tags } => {
-            run_ingest(cfg, path, &collection, &tags).await
+        Commands::Ingest { paths, recursive, collection, tags } => {
+            run_ingest(cfg, &paths, recursive, &collection, &tags).await
         }
     }
 }
@@ -86,7 +90,13 @@ async fn run_serve(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-async fn run_ingest(cfg: Config, path: String, collection: &str, tags: &[String]) -> Result<()> {
+async fn run_ingest(
+    cfg: Config,
+    paths: &[String],
+    recursive: bool,
+    collection: &str,
+    tags: &[String],
+) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool)
         .await
@@ -100,24 +110,67 @@ async fn run_ingest(cfg: Config, path: String, collection: &str, tags: &[String]
         overlap_tokens: cfg.chunk_overlap_tokens,
     };
 
-    let file_path = std::path::Path::new(&path);
-    let result = kosha::ingest::ingest_file(
-        &pool,
-        embedder.as_ref(),
-        file_path,
-        &chunk_cfg,
-        collection,
-        tags,
-    )
-    .await?;
+    let mut files = Vec::new();
+    for p in paths {
+        let path = std::path::Path::new(p);
+        if path.is_dir() {
+            if !recursive {
+                anyhow::bail!(
+                    "{} is a directory; use -r/--recursive to ingest directories",
+                    p
+                );
+            }
+            let dir_files = kosha::ingest::collect_files(path)
+                .with_context(|| format!("walking {p}"))?;
+            files.extend(dir_files);
+        } else {
+            files.push(path.to_path_buf());
+        }
+    }
 
-    if result.skipped {
-        eprintln!("kosha: already ingested (hash {})", result.content_hash);
-    } else {
-        eprintln!(
-            "kosha: ingested {} into '{}' ({} segments, {} chunks, hash {})",
-            result.source_path, result.collection, result.segments, result.chunks, result.content_hash
-        );
+    let total = files.len();
+    let mut ingested = 0u32;
+    let mut skipped = 0u32;
+    let mut errors = 0u32;
+
+    for (i, file_path) in files.iter().enumerate() {
+        let display = file_path.display();
+        eprintln!("[{}/{}] {}", i + 1, total, display);
+
+        match kosha::ingest::ingest_file(
+            &pool,
+            embedder.as_ref(),
+            file_path,
+            &chunk_cfg,
+            collection,
+            tags,
+        )
+        .await
+        {
+            Ok(result) if result.skipped => {
+                eprintln!("  skipped (already ingested)");
+                skipped += 1;
+            }
+            Ok(result) => {
+                eprintln!(
+                    "  {} segments, {} chunks",
+                    result.segments, result.chunks
+                );
+                ingested += 1;
+            }
+            Err(e) => {
+                eprintln!("  error: {e:#}");
+                errors += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "\nkosha: {ingested} ingested, {skipped} skipped, {errors} errors (of {total} files)"
+    );
+
+    if errors > 0 {
+        anyhow::bail!("{errors} file(s) failed to ingest");
     }
 
     Ok(())

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sqlx::PgPool;
 
@@ -24,6 +24,10 @@ pub struct IngestResult {
     pub skipped: bool,
 }
 
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "pdf", "epub", "png", "jpg", "jpeg", "md", "markdown", "html", "htm", "txt",
+];
+
 fn decomposer_for(path: &Path) -> Box<dyn Decomposer> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("pdf") => Box::new(PdfDecomposer),
@@ -33,6 +37,34 @@ fn decomposer_for(path: &Path) -> Box<dyn Decomposer> {
         Some("html" | "htm") => Box::new(HtmlDecomposer),
         _ => Box::new(PlainTextDecomposer),
     }
+}
+
+fn has_supported_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| SUPPORTED_EXTENSIONS.contains(&ext))
+}
+
+pub fn collect_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    collect_files_rec(dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_files_rec(dir: &Path, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')) {
+                collect_files_rec(&path, out)?;
+            }
+        } else if has_supported_extension(&path) {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 pub async fn ingest_file(
@@ -192,4 +224,66 @@ async fn ingest_segments(
     }
 
     Ok(total_chunks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn supported_extensions() {
+        assert!(has_supported_extension(Path::new("doc.pdf")));
+        assert!(has_supported_extension(Path::new("doc.epub")));
+        assert!(has_supported_extension(Path::new("doc.md")));
+        assert!(has_supported_extension(Path::new("doc.html")));
+        assert!(has_supported_extension(Path::new("photo.png")));
+        assert!(has_supported_extension(Path::new("photo.jpg")));
+        assert!(has_supported_extension(Path::new("photo.jpeg")));
+        assert!(has_supported_extension(Path::new("notes.txt")));
+        assert!(!has_supported_extension(Path::new("binary.exe")));
+        assert!(!has_supported_extension(Path::new("no_extension")));
+    }
+
+    #[test]
+    fn collect_files_walks_recursively() {
+        let tmp = tempdir();
+        fs::write(tmp.join("a.md"), "hello").unwrap();
+        fs::write(tmp.join("b.txt"), "world").unwrap();
+        fs::write(tmp.join("skip.rs"), "fn main() {}").unwrap();
+        fs::create_dir(tmp.join("sub")).unwrap();
+        fs::write(tmp.join("sub/c.pdf"), "fake pdf").unwrap();
+        fs::create_dir(tmp.join(".hidden")).unwrap();
+        fs::write(tmp.join(".hidden/d.md"), "secret").unwrap();
+
+        let files = collect_files(&tmp).unwrap();
+        let names: Vec<&str> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+
+        assert!(names.contains(&"a.md"));
+        assert!(names.contains(&"b.txt"));
+        assert!(names.contains(&"c.pdf"));
+        assert!(!names.contains(&"skip.rs"), "unsupported extension should be skipped");
+        assert!(!names.contains(&"d.md"), "hidden directories should be skipped");
+        assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn collect_files_sorted() {
+        let tmp = tempdir();
+        fs::write(tmp.join("z.txt"), "").unwrap();
+        fs::write(tmp.join("a.txt"), "").unwrap();
+
+        let files = collect_files(&tmp).unwrap();
+        assert!(files[0] < files[1]);
+    }
+
+    fn tempdir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("kosha-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 }
