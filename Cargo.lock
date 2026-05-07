@@ -1934,6 +1934,7 @@ dependencies = [
  "dotenvy",
  "fastembed",
  "half",
+ "ort",
  "pgvector",
  "rmcp",
  "schemars",
