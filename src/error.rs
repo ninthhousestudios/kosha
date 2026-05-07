@@ -28,6 +28,12 @@ pub enum KoshaError {
         tool: &'static str,
         message: String,
     },
+
+    #[error("embed error: {0}")]
+    Embed(String),
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl KoshaError {
@@ -63,6 +69,16 @@ impl KoshaError {
                 tool,
                 constraint: message.clone(),
                 next_action: "Report this as a bug; include server logs.".to_string(),
+            },
+            Self::Embed(msg) => ErrorData {
+                tool: "server",
+                constraint: "embedding model must be operational".to_string(),
+                next_action: format!("Check model availability: {msg}"),
+            },
+            Self::Io(e) => ErrorData {
+                tool: "server",
+                constraint: "file must be readable".to_string(),
+                next_action: format!("Check file path and permissions: {e}"),
             },
         }
     }

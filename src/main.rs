@@ -1,9 +1,17 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
-use kosha::{config::Config, db, mcp::KoshaServer};
+use kosha::{
+    chunk::ChunkConfig,
+    config::Config,
+    db,
+    embed::Embedder,
+    mcp::KoshaServer,
+};
 
 /// kosha: document intelligence MCP server.
 #[derive(Debug, Parser)]
@@ -52,7 +60,11 @@ async fn run_serve(cfg: Config) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool).await.context("running migrations")?;
 
-    let server = KoshaServer::new(pool);
+    tracing::info!(repo = %cfg.model_repo, "loading embedding model");
+    let embedder = load_embedder(&cfg.model_repo).await?;
+    let embedder = Arc::new(embedder);
+
+    let server = KoshaServer::new(pool, embedder);
     let service = server.serve(stdio()).await.context("starting MCP server")?;
 
     tokio::select! {
@@ -67,10 +79,43 @@ async fn run_serve(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-async fn run_ingest(_cfg: Config, path: String) -> Result<()> {
-    tracing::info!(%path, "ingest not yet implemented");
-    eprintln!("kosha ingest: not yet implemented (see kosha/8 for embedding prerequisites)");
+async fn run_ingest(cfg: Config, path: String) -> Result<()> {
+    let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
+    db::run_migrations(&pool).await.context("running migrations")?;
+
+    tracing::info!(repo = %cfg.model_repo, "loading embedding model");
+    let embedder = load_embedder(&cfg.model_repo).await?;
+    let embedder = Arc::new(embedder);
+
+    let chunk_cfg = ChunkConfig {
+        max_tokens: cfg.chunk_max_tokens,
+        overlap_tokens: cfg.chunk_overlap_tokens,
+    };
+
+    let file_path = std::path::Path::new(&path);
+    let result = kosha::ingest::ingest_file(&pool, &embedder, file_path, &chunk_cfg).await?;
+
+    if result.skipped {
+        eprintln!(
+            "kosha: already ingested (hash {})",
+            result.content_hash
+        );
+    } else {
+        eprintln!(
+            "kosha: ingested {} ({} segments, {} chunks, hash {})",
+            result.source_path, result.segments, result.chunks, result.content_hash
+        );
+    }
+
     Ok(())
+}
+
+async fn load_embedder(repo: &str) -> Result<Embedder> {
+    let repo = repo.to_string();
+    tokio::task::spawn_blocking(move || Embedder::load(&repo))
+        .await
+        .context("join error")?
+        .context("loading embedder")
 }
 
 #[cfg(unix)]

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -6,19 +8,22 @@ use rmcp::{
 };
 use sqlx::PgPool;
 
+use crate::embed::Embedder;
 use crate::error::KoshaError;
 use crate::tools;
 
 #[derive(Clone)]
 pub struct KoshaServer {
     pool: PgPool,
+    embedder: Arc<Embedder>,
     tool_router: ToolRouter<Self>,
 }
 
 impl KoshaServer {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool, embedder: Arc<Embedder>) -> Self {
         Self {
             pool,
+            embedder,
             tool_router: Self::tool_router(),
         }
     }
@@ -32,6 +37,28 @@ impl KoshaServer {
         Parameters(_args): Parameters<tools::HealthArgs>,
     ) -> Result<String, ErrorData> {
         let out = tools::health::handle(&self.pool)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(description = "Semantic search over ingested documents. Returns ranked chunk results with content snippets and citations (leaf_id, source_path, segment/chunk indices). Use citations with kosha_read for surrounding context.")]
+    pub async fn kosha_search(
+        &self,
+        Parameters(args): Parameters<tools::SearchArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::search::handle(&self.pool, &self.embedder, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(description = "Read document content by citation. Provide leaf_id + segment_index to read a full segment. Add chunk_index for a single chunk. Add to_chunk_index for a chunk range. Use after kosha_search to expand context around a hit.")]
+    pub async fn kosha_read(
+        &self,
+        Parameters(args): Parameters<tools::ReadArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::read::handle(&self.pool, args)
             .await
             .map_err(kosha_to_rmcp)?;
         serde_json::to_string(&out).map_err(json_to_rmcp)

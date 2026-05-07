@@ -9,6 +9,9 @@ pub struct Config {
     pub db_max_connections: u32,
     pub db_acquire_timeout_secs: u64,
     pub db_idle_timeout_secs: u64,
+    pub model_repo: String,
+    pub chunk_max_tokens: usize,
+    pub chunk_overlap_tokens: usize,
 }
 
 impl Config {
@@ -34,12 +37,28 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300);
 
+        let model_repo = std::env::var("KOSHA_MODEL_REPO")
+            .unwrap_or_else(|_| "Qwen/Qwen3-VL-Embedding-2B".to_string());
+
+        let chunk_max_tokens: usize = std::env::var("KOSHA_CHUNK_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512);
+
+        let chunk_overlap_tokens: usize = std::env::var("KOSHA_CHUNK_OVERLAP_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         Self {
             database_url,
             log_level,
             db_max_connections,
             db_acquire_timeout_secs,
             db_idle_timeout_secs,
+            model_repo,
+            chunk_max_tokens,
+            chunk_overlap_tokens,
         }
     }
 }

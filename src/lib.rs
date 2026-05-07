@@ -1,5 +1,10 @@
+pub mod chunk;
 pub mod config;
 pub mod db;
+pub mod decompose;
+pub mod embed;
 pub mod error;
+pub mod ingest;
 pub mod mcp;
+pub mod store;
 pub mod tools;
