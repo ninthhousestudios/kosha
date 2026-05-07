@@ -19,6 +19,24 @@ smriti finds the file. kosha reads what's inside.
 - Not a code intelligence tool. That's sutra.
 - Not a memory system. That's chitta. kosha provides citations that chitta can store.
 
+## graceful tiering
+
+kosha is designed around capability tiers. Each tier activates when its provider is present and degrades cleanly when it isn't. A partial setup still works — you just get fewer capabilities, not crashes.
+
+| Tier | Name | Requires | Provides | Without it |
+|---|---|---|---|---|
+| 0 | **Structure** | Postgres only | Decompose, store, browse. `kosha list`, `kosha_read`, `kosha_outline` all work. Segments are stored with labels and text but no vectors. | — (always available) |
+| 1 | **Vector search** | Embedding provider (local or HTTP) | `kosha_search` returns semantically similar segments. Text and image queries in the same vector space. | Ingest stores structure only; search is unavailable. |
+| 2 | **Hybrid search** | Tier 1 + FTS (tsvector on `content_text`) | Combines lexical and semantic retrieval via reciprocal rank fusion. Precise for keyword hits, semantic for conceptual matches. | Vector-only search; exact-term queries may miss obvious matches. |
+| 3 | **Rerank** | Tier 2 + reranker model | Cross-encoder re-scoring of hybrid candidates for higher precision. | Hybrid results are returned as-is; good enough for most queries. |
+| 4 | **Ask** | Tier 1+ and a generation provider (LLM) | RAG: retrieve segments, assemble context, generate answers with citations. | Search returns raw segments; the agent synthesizes on its own. |
+
+Each tier builds on the previous ones. The boundary between tiers is a provider check, not a code path fork — the retrieval pipeline composes stages, and missing stages are skipped.
+
+**Error contract**: when an operation needs a tier that isn't available, kosha returns a clear error naming the missing provider ("search requires an embedding provider; set KOSHA_EMBED_PROVIDER"), not a stack trace or silent empty result. This applies to both CLI and MCP tool responses.
+
+Tiers 0-1 are implemented. Tiers 2-4 are design targets, listed here so the tier contract is explicit from the start rather than an emergent property of optional features.
+
 ## core concepts
 
 ### book
@@ -244,7 +262,7 @@ For moves/copies (same hash, different path), kosha updates the `source_path` on
 
 - **Segment size limits.** For large structureless text files, what's the max segment size before forcing a split? Deferred until the ingestion pipeline is built and we see real data.
 - **Model version tracking.** If the embedding model is updated, do we re-embed everything? Schema for tracking model version per segment? Deferred.
-- **FTS.** Text search (tsvector) alongside vector search, or reciprocal rank fusion. Deferred to post-v1.
+- **FTS.** Text search (tsvector) alongside vector search, or reciprocal rank fusion. Deferred to post-v1. See tier 2 in §graceful tiering.
 - **OCR.** Text extraction from scanned pages. Deferred to post-v1; multimodal embedding handles retrieval without it.
 - **Cross-edition identity.** Recognizing two different scans as the same work. Deferred; needs title-matching heuristics or user-supplied metadata.
 
