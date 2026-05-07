@@ -1,0 +1,70 @@
+use rmcp::{
+    ErrorData, ServerHandler,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{ServerCapabilities, ServerInfo},
+    tool, tool_handler, tool_router,
+};
+use sqlx::PgPool;
+
+use crate::error::KoshaError;
+use crate::tools;
+
+#[derive(Clone)]
+pub struct KoshaServer {
+    pool: PgPool,
+    tool_router: ToolRouter<Self>,
+}
+
+impl KoshaServer {
+    pub fn new(pool: PgPool) -> Self {
+        Self {
+            pool,
+            tool_router: Self::tool_router(),
+        }
+    }
+}
+
+#[tool_router(router = tool_router)]
+impl KoshaServer {
+    #[tool(description = "Health check. Verifies DB connectivity and reports server version.")]
+    pub async fn kosha_health(
+        &self,
+        Parameters(_args): Parameters<tools::HealthArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::health::handle(&self.pool)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+}
+
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for KoshaServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "kosha — document intelligence layer. Semantic search and citation over ingested documents.",
+        )
+    }
+}
+
+fn kosha_to_rmcp(e: KoshaError) -> ErrorData {
+    let code = e.code();
+    let message = e.to_string();
+    let data = serde_json::to_value(e.data()).ok();
+    if code == -32602 {
+        ErrorData::invalid_params(message, data)
+    } else {
+        ErrorData::internal_error(message, data)
+    }
+}
+
+fn json_to_rmcp(e: serde_json::Error) -> ErrorData {
+    ErrorData::internal_error(
+        format!("failed to serialize response: {e}"),
+        Some(serde_json::json!({
+            "tool": "server",
+            "constraint": "response serializes to JSON",
+            "next_action": "Report this as a bug; include server logs.",
+        })),
+    )
+}

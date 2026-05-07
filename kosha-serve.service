@@ -1,0 +1,10 @@
+[Unit]
+Description=kosha MCP server
+
+[Service]
+ExecStart=%h/.cargo/bin/kosha serve
+Restart=always
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target
