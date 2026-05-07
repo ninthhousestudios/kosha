@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn collect_files_walks_recursively() {
-        let tmp = tempdir();
+        let tmp = tempdir("walk");
         fs::write(tmp.join("a.md"), "hello").unwrap();
         fs::write(tmp.join("b.txt"), "world").unwrap();
         fs::write(tmp.join("skip.rs"), "fn main() {}").unwrap();
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn collect_files_sorted() {
-        let tmp = tempdir();
+        let tmp = tempdir("sort");
         fs::write(tmp.join("z.txt"), "").unwrap();
         fs::write(tmp.join("a.txt"), "").unwrap();
 
@@ -280,8 +280,8 @@ mod tests {
         assert!(files[0] < files[1]);
     }
 
-    fn tempdir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("kosha-test-{}", std::process::id()));
+    fn tempdir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("kosha-test-{}-{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

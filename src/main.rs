@@ -25,6 +25,20 @@ struct Cli {
 enum Commands {
     /// Run as a stdio MCP server (default).
     Serve,
+    /// List ingested documents, or show outline for a specific leaf.
+    List {
+        /// Content hash (prefix ok) to show outline for. Omit to list all leaves.
+        leaf: Option<String>,
+        /// Filter by collection.
+        #[arg(long)]
+        collection: Option<String>,
+        /// Filter by format (e.g. pdf, epub, markdown).
+        #[arg(long)]
+        format: Option<String>,
+        /// Filter by tag (repeatable).
+        #[arg(long = "tag", num_args = 1)]
+        tags: Vec<String>,
+    },
     /// Ingest documents into the database.
     Ingest {
         /// Files or directories to ingest.
@@ -59,6 +73,9 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Serve) {
         Commands::Serve => run_serve(cfg).await,
+        Commands::List { leaf, collection, format, tags } => {
+            run_list(cfg, leaf, collection, format, &tags).await
+        }
         Commands::Ingest { paths, recursive, collection, tags } => {
             run_ingest(cfg, &paths, recursive, &collection, &tags).await
         }
@@ -85,6 +102,82 @@ async fn run_serve(cfg: Config) -> Result<()> {
         _ = shutdown_signal() => {
             tracing::info!("shutdown signal received");
         }
+    }
+
+    Ok(())
+}
+
+async fn run_list(
+    cfg: Config,
+    leaf: Option<String>,
+    collection: Option<String>,
+    format: Option<String>,
+    tags: &[String],
+) -> Result<()> {
+    let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
+
+    if let Some(prefix) = leaf {
+        let full_hash = kosha::store::resolve_hash_prefix(&pool, &prefix)
+            .await?
+            .with_context(|| format!("no leaf matches hash prefix '{prefix}'"))?;
+        let leaf_info = kosha::store::get_leaf(&pool, &full_hash).await?;
+        if let Some(info) = &leaf_info {
+            println!("{} ({})", info.source_path, info.format);
+            println!(
+                "{} segments, {} chunks, collection: {}",
+                info.segment_count, info.chunk_count, info.collection
+            );
+            if !info.tags.is_empty() {
+                println!("tags: {}", info.tags.join(", "));
+            }
+            println!();
+        }
+        let outline = kosha::store::leaf_outline(&pool, &full_hash).await?;
+        for entry in &outline {
+            println!("  {:>3}  {}", entry.segment_index, entry.segment_label);
+        }
+    } else {
+        let colls: Option<Vec<String>> = collection.map(|c| vec![c]);
+        let tag_vec: Option<&[String]> = if tags.is_empty() { None } else { Some(tags) };
+        let leaves = kosha::store::list_leaves(
+            &pool,
+            format.as_deref(),
+            Some("ready"),
+            colls.as_deref(),
+            tag_vec,
+            500,
+        )
+        .await?;
+
+        if leaves.is_empty() {
+            println!("No documents ingested.");
+            return Ok(());
+        }
+
+        println!(
+            "{:<12} {:<10} {:<12} {:>4} {:>6}  {}",
+            "HASH", "FORMAT", "COLLECTION", "SEG", "CHUNKS", "PATH"
+        );
+        for leaf in &leaves {
+            let hash_short = if leaf.content_hash.len() > 10 {
+                &leaf.content_hash[..10]
+            } else {
+                &leaf.content_hash
+            };
+            println!(
+                "{:<12} {:<10} {:<12} {:>4} {:>6}  {}",
+                hash_short,
+                leaf.format,
+                leaf.collection,
+                leaf.segment_count,
+                leaf.chunk_count,
+                leaf.source_path,
+            );
+        }
+        println!("\n{} document(s)", leaves.len());
     }
 
     Ok(())

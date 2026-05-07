@@ -11,6 +11,23 @@ fn f32_to_halfvec(v: &[f32]) -> HalfVector {
 
 // ── Insert operations ──
 
+pub async fn resolve_hash_prefix(pool: &PgPool, prefix: &str) -> Result<Option<String>> {
+    let rows = sqlx::query_scalar::<_, String>(
+        "SELECT content_hash FROM leaves WHERE content_hash LIKE $1 || '%' LIMIT 2",
+    )
+    .bind(prefix)
+    .fetch_all(pool)
+    .await?;
+    match rows.len() {
+        0 => Ok(None),
+        1 => Ok(Some(rows.into_iter().next().unwrap())),
+        _ => Err(crate::error::KoshaError::Internal {
+            tool: "list",
+            message: format!("ambiguous hash prefix '{prefix}' — matches multiple leaves"),
+        }),
+    }
+}
+
 pub async fn leaf_status(pool: &PgPool, content_hash: &str) -> Result<Option<String>> {
     let row = sqlx::query_scalar::<_, String>("SELECT status FROM leaves WHERE content_hash = $1")
         .bind(content_hash)
