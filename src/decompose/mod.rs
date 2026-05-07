@@ -1,4 +1,6 @@
+pub mod html;
 pub mod image;
+pub mod markdown;
 pub mod pdf;
 pub mod plain_text;
 

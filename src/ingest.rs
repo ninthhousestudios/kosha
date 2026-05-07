@@ -4,7 +4,9 @@ use sqlx::PgPool;
 
 use crate::chunk::{self, ChunkConfig};
 use crate::decompose::Decomposer;
+use crate::decompose::html::HtmlDecomposer;
 use crate::decompose::image::ImageDecomposer;
+use crate::decompose::markdown::MarkdownDecomposer;
 use crate::decompose::pdf::PdfDecomposer;
 use crate::decompose::plain_text::PlainTextDecomposer;
 use crate::embed::EmbedProvider;
@@ -25,6 +27,8 @@ fn decomposer_for(path: &Path) -> Box<dyn Decomposer> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("pdf") => Box::new(PdfDecomposer),
         Some("png" | "jpg" | "jpeg") => Box::new(ImageDecomposer),
+        Some("md" | "markdown") => Box::new(MarkdownDecomposer),
+        Some("html" | "htm") => Box::new(HtmlDecomposer),
         _ => Box::new(PlainTextDecomposer),
     }
 }
