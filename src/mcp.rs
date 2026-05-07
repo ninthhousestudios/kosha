@@ -42,7 +42,9 @@ impl KoshaServer {
         serde_json::to_string(&out).map_err(json_to_rmcp)
     }
 
-    #[tool(description = "Semantic search over ingested documents. Returns ranked chunk results with content snippets and citations (leaf_id, source_path, segment/chunk indices). Use citations with kosha_read for surrounding context.")]
+    #[tool(
+        description = "Semantic search over ingested documents. Returns ranked chunk results with content snippets and citations (leaf_id, source_path, segment/chunk indices). Use citations with kosha_read for surrounding context."
+    )]
     pub async fn kosha_search(
         &self,
         Parameters(args): Parameters<tools::SearchArgs>,
@@ -53,7 +55,9 @@ impl KoshaServer {
         serde_json::to_string(&out).map_err(json_to_rmcp)
     }
 
-    #[tool(description = "Read document content by citation. Provide leaf_id + segment_index to read a full segment. Add chunk_index for a single chunk. Add to_chunk_index for a chunk range. Use after kosha_search to expand context around a hit.")]
+    #[tool(
+        description = "Read document content by citation. Provide leaf_id + segment_index to read a full segment. Add chunk_index for a single chunk. Add to_chunk_index for a chunk range. Use after kosha_search to expand context around a hit."
+    )]
     pub async fn kosha_read(
         &self,
         Parameters(args): Parameters<tools::ReadArgs>,

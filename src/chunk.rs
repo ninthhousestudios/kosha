@@ -54,20 +54,16 @@ pub fn chunk_segment(text: &str, segment_label: &str, cfg: &ChunkConfig) -> Vec<
             end += 1;
         }
 
-        if end < text.len() {
-            if let Some(ws_pos) = text[start..end].rfind(char::is_whitespace) {
-                end = start + ws_pos + 1;
-            }
+        if end < text.len()
+            && let Some(ws_pos) = text[start..end].rfind(char::is_whitespace)
+        {
+            end = start + ws_pos + 1;
         }
 
         let chunk_text = text[start..end].trim();
         if !chunk_text.is_empty() {
             let idx = chunks.len();
-            let label = if text.len() <= max_chars {
-                segment_label.to_string()
-            } else {
-                format!("{segment_label} [{}/{}]", idx + 1, "?")
-            };
+            let label = format!("{segment_label} [{}/{}]", idx + 1, "?");
             chunks.push(Chunk {
                 index: idx,
                 label,
@@ -82,6 +78,9 @@ pub fn chunk_segment(text: &str, segment_label: &str, cfg: &ChunkConfig) -> Vec<
             window
         };
         start += advance;
+        while start < text.len() && !text.is_char_boundary(start) {
+            start += 1;
+        }
     }
 
     // Fix up labels now that we know total count.

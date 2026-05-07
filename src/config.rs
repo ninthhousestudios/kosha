@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-const DEFAULT_DATABASE_URL: &str = "postgresql://josh:ogham@localhost/kosha";
-
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database_url: String,
@@ -16,11 +14,10 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_url =
-            std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
+        let database_url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set (via environment or .env file)");
 
-        let log_level =
-            std::env::var("KOSHA_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+        let log_level = std::env::var("KOSHA_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
 
         let db_max_connections: u32 = std::env::var("KOSHA_DB_MAX_CONNECTIONS")
             .ok()
@@ -49,6 +46,12 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+
+        assert!(chunk_max_tokens > 0, "KOSHA_CHUNK_MAX_TOKENS must be > 0");
+        assert!(
+            chunk_overlap_tokens < chunk_max_tokens,
+            "KOSHA_CHUNK_OVERLAP_TOKENS ({chunk_overlap_tokens}) must be < KOSHA_CHUNK_MAX_TOKENS ({chunk_max_tokens})"
+        );
 
         Self {
             database_url,

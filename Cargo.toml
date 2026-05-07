@@ -28,11 +28,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-fastembed = { path = "/home/josh/soft/fastembed-local", default-features = false, features = ["qwen3", "hf-hub-native-tls"] }
+fastembed = { git = "https://github.com/ninthhousestudios/fastembed-rs.git", branch = "fix/qwen3-f16-dtype-mismatches", default-features = false, features = ["qwen3", "hf-hub-native-tls"] }
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["alternative-backend"] }
 candle-core = "0.10.2"
 
 [patch.crates-io]
-candle-core = { path = "/home/josh/soft/candle/candle-core" }
-candle-nn = { path = "/home/josh/soft/candle/candle-nn" }
-gemm = { path = "/home/josh/soft/gemm/gemm" }
+candle-core = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
+candle-nn = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
+gemm = { git = "https://github.com/ninthhousestudios/gemm.git", branch = "bf16" }

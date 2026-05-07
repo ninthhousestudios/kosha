@@ -11,12 +11,11 @@ fn f32_to_halfvec(v: &[f32]) -> HalfVector {
 
 // ── Insert operations ──
 
-pub async fn leaf_exists(pool: &PgPool, content_hash: &str) -> Result<bool> {
-    let row =
-        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM leaves WHERE content_hash = $1)")
-            .bind(content_hash)
-            .fetch_one(pool)
-            .await?;
+pub async fn leaf_status(pool: &PgPool, content_hash: &str) -> Result<Option<String>> {
+    let row = sqlx::query_scalar::<_, String>("SELECT status FROM leaves WHERE content_hash = $1")
+        .bind(content_hash)
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 
@@ -31,7 +30,12 @@ pub async fn insert_leaf(
     sqlx::query(
         "INSERT INTO leaves (content_hash, source_path, format, title, segment_count, status)
          VALUES ($1, $2, $3, $4, $5, 'processing')
-         ON CONFLICT (content_hash) DO NOTHING",
+         ON CONFLICT (content_hash) DO UPDATE SET
+           source_path = EXCLUDED.source_path,
+           segment_count = EXCLUDED.segment_count,
+           status = 'processing',
+           error = NULL,
+           updated_at = now()",
     )
     .bind(content_hash)
     .bind(source_path)
@@ -62,6 +66,18 @@ pub async fn mark_leaf_error(pool: &PgPool, content_hash: &str, error: &str) -> 
     Ok(())
 }
 
+pub async fn purge_leaf_children(pool: &PgPool, content_hash: &str) -> Result<()> {
+    sqlx::query("DELETE FROM chunks WHERE leaf_id = $1")
+        .bind(content_hash)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM segments WHERE leaf_id = $1")
+        .bind(content_hash)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn insert_segment(
     pool: &PgPool,
     leaf_id: &str,
@@ -70,19 +86,22 @@ pub async fn insert_segment(
     content_text: &str,
 ) -> Result<Uuid> {
     let id = Uuid::now_v7();
-    sqlx::query(
+    let actual_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO segments (id, leaf_id, segment_index, segment_label, content_text)
          VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (leaf_id, segment_index) DO NOTHING",
+         ON CONFLICT (leaf_id, segment_index) DO UPDATE SET
+           segment_label = EXCLUDED.segment_label,
+           content_text = EXCLUDED.content_text
+         RETURNING id",
     )
     .bind(id)
     .bind(leaf_id)
     .bind(segment_index)
     .bind(segment_label)
     .bind(content_text)
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(id)
+    Ok(actual_id)
 }
 
 pub async fn insert_chunk(

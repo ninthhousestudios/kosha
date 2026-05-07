@@ -5,13 +5,7 @@ use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
-use kosha::{
-    chunk::ChunkConfig,
-    config::Config,
-    db,
-    embed::Embedder,
-    mcp::KoshaServer,
-};
+use kosha::{chunk::ChunkConfig, config::Config, db, embed::Embedder, mcp::KoshaServer};
 
 /// kosha: document intelligence MCP server.
 #[derive(Debug, Parser)]
@@ -42,8 +36,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&cfg.log_level)),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level)),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -58,7 +51,9 @@ async fn run_serve(cfg: Config) -> Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "kosha starting");
 
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     tracing::info!(repo = %cfg.model_repo, "loading embedding model");
     let embedder = load_embedder(&cfg.model_repo).await?;
@@ -81,7 +76,9 @@ async fn run_serve(cfg: Config) -> Result<()> {
 
 async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     tracing::info!(repo = %cfg.model_repo, "loading embedding model");
     let embedder = load_embedder(&cfg.model_repo).await?;
@@ -96,10 +93,7 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     let result = kosha::ingest::ingest_file(&pool, &embedder, file_path, &chunk_cfg).await?;
 
     if result.skipped {
-        eprintln!(
-            "kosha: already ingested (hash {})",
-            result.content_hash
-        );
+        eprintln!("kosha: already ingested (hash {})", result.content_hash);
     } else {
         eprintln!(
             "kosha: ingested {} ({} segments, {} chunks, hash {})",

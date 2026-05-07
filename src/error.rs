@@ -24,10 +24,7 @@ pub enum KoshaError {
     },
 
     #[error("internal error: {message}")]
-    Internal {
-        tool: &'static str,
-        message: String,
-    },
+    Internal { tool: &'static str, message: String },
 
     #[error("embed error: {0}")]
     Embed(String),

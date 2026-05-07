@@ -4,8 +4,8 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::chunk::{self, ChunkConfig};
-use crate::decompose::plain_text::PlainTextDecomposer;
 use crate::decompose::Decomposer;
+use crate::decompose::plain_text::PlainTextDecomposer;
 use crate::embed::Embedder;
 use crate::store;
 
@@ -30,15 +30,22 @@ pub async fn ingest_file(
     let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
     tracing::info!(%content_hash, %source_path, "checking leaf");
 
-    if store::leaf_exists(pool, &content_hash).await? {
-        tracing::info!(%content_hash, "leaf already exists, skipping");
-        return Ok(IngestResult {
-            content_hash,
-            source_path,
-            segments: 0,
-            chunks: 0,
-            skipped: true,
-        });
+    match store::leaf_status(pool, &content_hash).await? {
+        Some(ref s) if s == "ready" => {
+            tracing::info!(%content_hash, "leaf already ingested, skipping");
+            return Ok(IngestResult {
+                content_hash,
+                source_path,
+                segments: 0,
+                chunks: 0,
+                skipped: true,
+            });
+        }
+        Some(ref status) => {
+            tracing::info!(%content_hash, %status, "purging partial data for re-ingest");
+            store::purge_leaf_children(pool, &content_hash).await?;
+        }
+        None => {}
     }
 
     let decomposer = PlainTextDecomposer;

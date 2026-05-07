@@ -32,8 +32,7 @@ pub async fn handle(pool: &PgPool, args: ReadArgs) -> Result<ReadOutput> {
     match (args.chunk_index, args.to_chunk_index) {
         (Some(ci), Some(to_ci)) => {
             let records =
-                store::read_chunk_range(pool, &args.leaf_id, args.segment_index, ci, to_ci)
-                    .await?;
+                store::read_chunk_range(pool, &args.leaf_id, args.segment_index, ci, to_ci).await?;
             if records.is_empty() {
                 return Err(KoshaError::NotFound {
                     tool: "kosha_read",
@@ -89,17 +88,16 @@ pub async fn handle(pool: &PgPool, args: ReadArgs) -> Result<ReadOutput> {
         }
 
         (None, _) => {
-            let record =
-                store::read_segment(pool, &args.leaf_id, args.segment_index)
-                    .await?
-                    .ok_or_else(|| KoshaError::NotFound {
-                        tool: "kosha_read",
-                        kind: "segment",
-                        next_action: format!(
-                            "No segment found for leaf {} segment {}",
-                            args.leaf_id, args.segment_index
-                        ),
-                    })?;
+            let record = store::read_segment(pool, &args.leaf_id, args.segment_index)
+                .await?
+                .ok_or_else(|| KoshaError::NotFound {
+                    tool: "kosha_read",
+                    kind: "segment",
+                    next_action: format!(
+                        "No segment found for leaf {} segment {}",
+                        args.leaf_id, args.segment_index
+                    ),
+                })?;
             Ok(ReadOutput {
                 mode: "segment",
                 content: record.content_text,

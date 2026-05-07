@@ -351,6 +351,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 [[package]]
 name = "candle-core"
 version = "0.10.2"
+source = "git+https://github.com/ninthhousestudios/candle.git?branch=bf16-cpu-matmul#8e4206b03b8b0d6e0ce36e094670c89557dc60b1"
 dependencies = [
  "byteorder",
  "float8",
@@ -373,6 +374,7 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.10.2"
+source = "git+https://github.com/ninthhousestudios/candle.git?branch=bf16-cpu-matmul#8e4206b03b8b0d6e0ce36e094670c89557dc60b1"
 dependencies = [
  "candle-core",
  "half",
@@ -1010,6 +1012,7 @@ dependencies = [
 [[package]]
 name = "fastembed"
 version = "5.13.3"
+source = "git+https://github.com/ninthhousestudios/fastembed-rs.git?branch=fix%2Fqwen3-f16-dtype-mismatches#491ca398ab793eb0f5443820757e529f0ed5a6e9"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -1228,6 +1231,7 @@ dependencies = [
 [[package]]
 name = "gemm"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-bf16",
@@ -1247,6 +1251,7 @@ dependencies = [
 [[package]]
 name = "gemm-bf16"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
@@ -1263,6 +1268,7 @@ dependencies = [
 [[package]]
 name = "gemm-c32"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
@@ -1276,6 +1282,7 @@ dependencies = [
 [[package]]
 name = "gemm-c64"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
@@ -1289,6 +1296,7 @@ dependencies = [
 [[package]]
 name = "gemm-common"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "bytemuck",
  "dyn-stack",
@@ -1308,6 +1316,7 @@ dependencies = [
 [[package]]
 name = "gemm-f16"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
@@ -1324,6 +1333,7 @@ dependencies = [
 [[package]]
 name = "gemm-f32"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
@@ -1337,6 +1347,7 @@ dependencies = [
 [[package]]
 name = "gemm-f64"
 version = "0.19.0"
+source = "git+https://github.com/ninthhousestudios/gemm.git?branch=bf16#d2e0edf94485ead9c2460b6f5599ffed12034f10"
 dependencies = [
  "dyn-stack",
  "gemm-common",
