@@ -25,6 +25,14 @@ pub trait EmbedProvider: Send + Sync {
         })
     }
 
+    fn embed_image_bytes(
+        &self,
+        images: Vec<Vec<u8>>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+        let _ = images;
+        Box::pin(async { Err(anyhow::anyhow!("image embedding not supported by this provider")) })
+    }
+
     fn model_name(&self) -> &str;
     fn dimension(&self) -> usize;
     fn provider_name(&self) -> &str;

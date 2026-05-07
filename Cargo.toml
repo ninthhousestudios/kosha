@@ -32,6 +32,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 fastembed = { git = "https://github.com/ninthhousestudios/fastembed-rs.git", branch = "fix/qwen3-f16-dtype-mismatches", default-features = false, features = ["qwen3", "hf-hub-native-tls"] }
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["alternative-backend"] }
 candle-core = "0.10.2"
+poppler-rs = "0.26"
+cairo-rs = { version = "0.22", features = ["png"] }
 
 [patch.crates-io]
 candle-core = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }

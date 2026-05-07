@@ -83,7 +83,7 @@ pub async fn insert_segment(
     leaf_id: &str,
     segment_index: i32,
     segment_label: &str,
-    content_text: &str,
+    content_text: Option<&str>,
 ) -> Result<Uuid> {
     let id = Uuid::now_v7();
     let actual_id = sqlx::query_scalar::<_, Uuid>(
@@ -111,7 +111,7 @@ pub async fn insert_chunk(
     leaf_id: &str,
     segment_index: i32,
     chunk_label: &str,
-    content_text: &str,
+    content_text: Option<&str>,
     embedding: &[f32],
     embed_provider: &str,
     embed_model: &str,
