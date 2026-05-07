@@ -67,6 +67,45 @@ impl KoshaServer {
             .map_err(kosha_to_rmcp)?;
         serde_json::to_string(&out).map_err(json_to_rmcp)
     }
+
+    #[tool(
+        description = "Get metadata for a single ingested leaf (document). Returns format, segment/chunk counts, status, source path, and content hash."
+    )]
+    pub async fn kosha_leaf(
+        &self,
+        Parameters(args): Parameters<tools::LeafArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::leaf::handle(&self.pool, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(
+        description = "List ingested leaves (documents). Optional filters: format (e.g. 'plain_text'), status ('ready', 'processing', 'error'). Returns summary metadata for each leaf."
+    )]
+    pub async fn kosha_leaves(
+        &self,
+        Parameters(args): Parameters<tools::LeavesArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::leaves::handle(&self.pool, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(
+        description = "Get the segment outline (table of contents) for a leaf. Returns segment labels in order — useful for navigating a document before reading specific segments."
+    )]
+    pub async fn kosha_outline(
+        &self,
+        Parameters(args): Parameters<tools::OutlineArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::outline::handle(&self.pool, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]

@@ -140,6 +140,126 @@ pub async fn insert_chunk(
     Ok(())
 }
 
+// ── Leaf queries ──
+
+#[derive(Debug, serde::Serialize)]
+pub struct LeafRecord {
+    pub content_hash: String,
+    pub source_path: String,
+    pub format: String,
+    pub title: Option<String>,
+    pub segment_count: i32,
+    pub chunk_count: i64,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct LeafRow {
+    content_hash: String,
+    source_path: String,
+    format: String,
+    title: Option<String>,
+    segment_count: i32,
+    chunk_count: i64,
+    status: String,
+    error: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<LeafRow> for LeafRecord {
+    fn from(r: LeafRow) -> Self {
+        Self {
+            content_hash: r.content_hash,
+            source_path: r.source_path,
+            format: r.format,
+            title: r.title,
+            segment_count: r.segment_count,
+            chunk_count: r.chunk_count,
+            status: r.status,
+            error: r.error,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+pub async fn get_leaf(pool: &PgPool, content_hash: &str) -> Result<Option<LeafRecord>> {
+    let row = sqlx::query_as::<_, LeafRow>(
+        "SELECT l.content_hash, l.source_path, l.format, l.title, l.segment_count,
+                COALESCE(c.cnt, 0) AS chunk_count,
+                l.status, l.error, l.created_at, l.updated_at
+         FROM leaves l
+         LEFT JOIN (SELECT leaf_id, count(*) AS cnt FROM chunks GROUP BY leaf_id) c
+           ON c.leaf_id = l.content_hash
+         WHERE l.content_hash = $1",
+    )
+    .bind(content_hash)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(Into::into))
+}
+
+pub async fn list_leaves(
+    pool: &PgPool,
+    format: Option<&str>,
+    status: Option<&str>,
+    limit: i64,
+) -> Result<Vec<LeafRecord>> {
+    let rows = sqlx::query_as::<_, LeafRow>(
+        "SELECT l.content_hash, l.source_path, l.format, l.title, l.segment_count,
+                COALESCE(c.cnt, 0) AS chunk_count,
+                l.status, l.error, l.created_at, l.updated_at
+         FROM leaves l
+         LEFT JOIN (SELECT leaf_id, count(*) AS cnt FROM chunks GROUP BY leaf_id) c
+           ON c.leaf_id = l.content_hash
+         WHERE ($1::text IS NULL OR l.format = $1)
+           AND ($2::text IS NULL OR l.status = $2)
+         ORDER BY l.updated_at DESC
+         LIMIT $3",
+    )
+    .bind(format)
+    .bind(status)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct OutlineEntry {
+    pub segment_index: i32,
+    pub segment_label: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct OutlineRow {
+    segment_index: i32,
+    segment_label: String,
+}
+
+pub async fn leaf_outline(pool: &PgPool, leaf_id: &str) -> Result<Vec<OutlineEntry>> {
+    let rows = sqlx::query_as::<_, OutlineRow>(
+        "SELECT segment_index, segment_label
+         FROM segments
+         WHERE leaf_id = $1
+         ORDER BY segment_index",
+    )
+    .bind(leaf_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| OutlineEntry {
+            segment_index: r.segment_index,
+            segment_label: r.segment_label,
+        })
+        .collect())
+}
+
 // ── Search ──
 
 #[derive(Debug, serde::Serialize)]
