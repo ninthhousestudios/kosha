@@ -9,7 +9,7 @@ use kosha::{
     chunk::ChunkConfig,
     config::Config,
     db,
-    embed::{EmbedProvider, HttpEmbedder, LocalEmbedder},
+    embed::{Device, EmbedProvider, HttpEmbedder, LocalEmbedder},
     mcp::KoshaServer,
 };
 
@@ -17,6 +17,10 @@ use kosha::{
 #[derive(Debug, Parser)]
 #[command(name = "kosha", version, about)]
 struct Cli {
+    /// Device for local embedding: cpu, gpu, auto (default: auto).
+    #[arg(long, default_value = "auto", global = true)]
+    device: String,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -71,18 +75,20 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
+    let device = resolve_device(&cli.device)?;
+
     match cli.command.unwrap_or(Commands::Serve) {
-        Commands::Serve => run_serve(cfg).await,
+        Commands::Serve => run_serve(cfg, &device).await,
         Commands::List { leaf, collection, format, tags } => {
             run_list(cfg, leaf, collection, format, &tags).await
         }
         Commands::Ingest { paths, recursive, collection, tags } => {
-            run_ingest(cfg, &paths, recursive, &collection, &tags).await
+            run_ingest(cfg, &paths, recursive, &collection, &tags, &device).await
         }
     }
 }
 
-async fn run_serve(cfg: Config) -> Result<()> {
+async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "kosha starting");
 
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
@@ -90,7 +96,7 @@ async fn run_serve(cfg: Config) -> Result<()> {
         .await
         .context("running migrations")?;
 
-    let embedder = build_embedder(&cfg).await?;
+    let embedder = build_embedder(&cfg, device).await?;
 
     let server = KoshaServer::new(pool, embedder);
     let service = server.serve(stdio()).await.context("starting MCP server")?;
@@ -189,13 +195,14 @@ async fn run_ingest(
     recursive: bool,
     collection: &str,
     tags: &[String],
+    device: &Device,
 ) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool)
         .await
         .context("running migrations")?;
 
-    let embedder = build_embedder(&cfg).await?;
+    let embedder = build_embedder(&cfg, device).await?;
 
     let chunk_cfg = ChunkConfig {
         target_tokens: cfg.chunk_target_tokens,
@@ -269,16 +276,54 @@ async fn run_ingest(
     Ok(())
 }
 
-async fn build_embedder(cfg: &Config) -> Result<Arc<dyn EmbedProvider>> {
+fn resolve_device(s: &str) -> Result<Device> {
+    match s {
+        "cpu" => Ok(Device::Cpu),
+        "gpu" => {
+            #[cfg(feature = "cuda")]
+            {
+                Device::new_cuda(0).context("failed to initialize CUDA device")
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                anyhow::bail!("--device gpu requires kosha built with --features cuda")
+            }
+        }
+        "auto" => {
+            #[cfg(feature = "cuda")]
+            {
+                match Device::new_cuda(0) {
+                    Ok(dev) => {
+                        tracing::info!("auto-detected CUDA device");
+                        Ok(dev)
+                    }
+                    Err(_) => {
+                        tracing::info!("no CUDA device available, falling back to CPU");
+                        Ok(Device::Cpu)
+                    }
+                }
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                Ok(Device::Cpu)
+            }
+        }
+        other => anyhow::bail!("unknown --device value: {other} (expected cpu, gpu, or auto)"),
+    }
+}
+
+async fn build_embedder(cfg: &Config, device: &Device) -> Result<Arc<dyn EmbedProvider>> {
     match cfg.embed_provider.as_str() {
         "local" => {
             let repo = cfg.model_repo.clone();
             let dim = cfg.embed_dimension;
-            tracing::info!(%repo, dim, "loading local embedding model");
-            let embedder = tokio::task::spawn_blocking(move || LocalEmbedder::load(&repo, dim))
-                .await
-                .context("join error")?
-                .context("loading local embedder")?;
+            let dev = device.clone();
+            tracing::info!(%repo, dim, device = ?dev, "loading local embedding model");
+            let embedder =
+                tokio::task::spawn_blocking(move || LocalEmbedder::load(&repo, dim, &dev))
+                    .await
+                    .context("join error")?
+                    .context("loading local embedder")?;
             Ok(Arc::new(embedder))
         }
         "http" => {

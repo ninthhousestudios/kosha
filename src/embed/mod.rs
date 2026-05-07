@@ -1,6 +1,7 @@
 mod http;
 mod local;
 
+pub use candle_core::Device;
 pub use http::HttpEmbedder;
 pub use local::LocalEmbedder;
 

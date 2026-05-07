@@ -14,8 +14,8 @@ pub struct LocalEmbedder {
 }
 
 impl LocalEmbedder {
-    pub fn load(repo_id: &str, dimension: usize) -> anyhow::Result<Self> {
-        let model = Qwen3VLEmbedding::from_hf(repo_id, &Device::Cpu, DType::BF16, 8192)
+    pub fn load(repo_id: &str, dimension: usize, device: &Device) -> anyhow::Result<Self> {
+        let model = Qwen3VLEmbedding::from_hf(repo_id, device, DType::BF16, 8192)
             .map_err(|e| anyhow::anyhow!("failed to load embedding model: {e}"))?;
         Ok(Self {
             model: Arc::new(model),

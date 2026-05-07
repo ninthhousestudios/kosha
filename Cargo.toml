@@ -36,6 +36,10 @@ poppler-rs = "0.26"
 zip = { version = "7", default-features = false, features = ["deflate"] }
 cairo-rs = { version = "0.22", features = ["png"] }
 
+[features]
+default = []
+cuda = ["fastembed/cuda"]
+
 [patch.crates-io]
 candle-core = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
 candle-nn = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
