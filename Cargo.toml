@@ -33,6 +33,7 @@ fastembed = { git = "https://github.com/ninthhousestudios/fastembed-rs.git", bra
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["alternative-backend"] }
 candle-core = "0.10.2"
 poppler-rs = "0.26"
+zip = { version = "7", default-features = false, features = ["deflate"] }
 cairo-rs = { version = "0.22", features = ["png"] }
 
 [patch.crates-io]

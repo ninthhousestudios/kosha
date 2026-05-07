@@ -1,3 +1,4 @@
+pub mod epub;
 pub mod html;
 pub mod image;
 pub mod markdown;

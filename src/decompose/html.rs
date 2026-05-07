@@ -93,7 +93,7 @@ fn try_parse_heading(html: &str, pos: usize) -> Option<HeadingMatch> {
     None
 }
 
-fn strip_tags(html: &str) -> String {
+pub(crate) fn strip_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
     for ch in html.chars() {
