@@ -43,7 +43,7 @@ impl KoshaServer {
     }
 
     #[tool(
-        description = "Semantic search over ingested documents. Returns ranked chunk results with content snippets and citations (leaf_id, source_path, segment/chunk indices). Use citations with kosha_read for surrounding context."
+        description = "Semantic search over ingested documents. Returns ranked chunk results with content snippets and citations (leaf_id, source_path, segment/chunk indices). Optional: collections (list of collection names to scope search), tags (list of tags, OR-match). Omit both to search everything. Use citations with kosha_read for surrounding context."
     )]
     pub async fn kosha_search(
         &self,
@@ -82,13 +82,26 @@ impl KoshaServer {
     }
 
     #[tool(
-        description = "List ingested leaves (documents). Optional filters: format (e.g. 'plain_text'), status ('ready', 'processing', 'error'). Returns summary metadata for each leaf."
+        description = "List ingested leaves (documents). Optional filters: format (e.g. 'plain_text'), status ('ready', 'processing', 'error'), collections (list of collection names), tags (list of tags, OR-match). Returns summary metadata for each leaf."
     )]
     pub async fn kosha_leaves(
         &self,
         Parameters(args): Parameters<tools::LeavesArgs>,
     ) -> Result<String, ErrorData> {
         let out = tools::leaves::handle(&self.pool, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(
+        description = "List distinct collection names across all ready leaves. Use to discover available collections before scoping a search."
+    )]
+    pub async fn kosha_collections(
+        &self,
+        Parameters(args): Parameters<tools::CollectionsArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::collections::handle(&self.pool, args)
             .await
             .map_err(kosha_to_rmcp)?;
         serde_json::to_string(&out).map_err(json_to_rmcp)

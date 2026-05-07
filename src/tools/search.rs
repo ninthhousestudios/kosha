@@ -9,6 +9,8 @@ use crate::store;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SearchArgs {
     pub query: String,
+    pub collections: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
     pub limit: Option<i64>,
 }
 
@@ -48,7 +50,14 @@ pub async fn handle(
         .await
         .map_err(|e| KoshaError::Embed(e.to_string()))?;
 
-    let results = store::search(pool, &query_embedding, limit).await?;
+    let results = store::search(
+        pool,
+        &query_embedding,
+        args.collections.as_deref(),
+        args.tags.as_deref(),
+        limit,
+    )
+    .await?;
 
     let hits: Vec<SearchHit> = results
         .into_iter()

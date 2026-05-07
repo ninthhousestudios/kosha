@@ -25,13 +25,15 @@ pub async fn insert_leaf(
     source_path: &str,
     format: &str,
     title: Option<&str>,
+    collection: &str,
     segment_count: i32,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO leaves (content_hash, source_path, format, title, segment_count, status)
-         VALUES ($1, $2, $3, $4, $5, 'processing')
+        "INSERT INTO leaves (content_hash, source_path, format, title, collection, segment_count, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'processing')
          ON CONFLICT (content_hash) DO UPDATE SET
            source_path = EXCLUDED.source_path,
+           collection = EXCLUDED.collection,
            segment_count = EXCLUDED.segment_count,
            status = 'processing',
            error = NULL,
@@ -41,6 +43,7 @@ pub async fn insert_leaf(
     .bind(source_path)
     .bind(format)
     .bind(title)
+    .bind(collection)
     .bind(segment_count)
     .execute(pool)
     .await?;
@@ -148,6 +151,8 @@ pub struct LeafRecord {
     pub source_path: String,
     pub format: String,
     pub title: Option<String>,
+    pub collection: String,
+    pub tags: Vec<String>,
     pub segment_count: i32,
     pub chunk_count: i64,
     pub status: String,
@@ -162,6 +167,7 @@ struct LeafRow {
     source_path: String,
     format: String,
     title: Option<String>,
+    collection: String,
     segment_count: i32,
     chunk_count: i64,
     status: String,
@@ -170,26 +176,9 @@ struct LeafRow {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl From<LeafRow> for LeafRecord {
-    fn from(r: LeafRow) -> Self {
-        Self {
-            content_hash: r.content_hash,
-            source_path: r.source_path,
-            format: r.format,
-            title: r.title,
-            segment_count: r.segment_count,
-            chunk_count: r.chunk_count,
-            status: r.status,
-            error: r.error,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-        }
-    }
-}
-
 pub async fn get_leaf(pool: &PgPool, content_hash: &str) -> Result<Option<LeafRecord>> {
     let row = sqlx::query_as::<_, LeafRow>(
-        "SELECT l.content_hash, l.source_path, l.format, l.title, l.segment_count,
+        "SELECT l.content_hash, l.source_path, l.format, l.title, l.collection, l.segment_count,
                 COALESCE(c.cnt, 0) AS chunk_count,
                 l.status, l.error, l.created_at, l.updated_at
          FROM leaves l
@@ -200,17 +189,40 @@ pub async fn get_leaf(pool: &PgPool, content_hash: &str) -> Result<Option<LeafRe
     .bind(content_hash)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(Into::into))
+    match row {
+        None => Ok(None),
+        Some(r) => {
+            let tags = leaf_tags(pool, &r.content_hash).await?;
+            Ok(Some(LeafRecord {
+                content_hash: r.content_hash,
+                source_path: r.source_path,
+                format: r.format,
+                title: r.title,
+                collection: r.collection,
+                tags,
+                segment_count: r.segment_count,
+                chunk_count: r.chunk_count,
+                status: r.status,
+                error: r.error,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }))
+        }
+    }
 }
 
 pub async fn list_leaves(
     pool: &PgPool,
     format: Option<&str>,
     status: Option<&str>,
+    collections: Option<&[String]>,
+    tags: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<LeafRecord>> {
+    let coll_vec: Option<Vec<String>> = collections.map(|c| c.to_vec());
+    let tags_vec: Option<Vec<String>> = tags.map(|t| t.to_vec());
     let rows = sqlx::query_as::<_, LeafRow>(
-        "SELECT l.content_hash, l.source_path, l.format, l.title, l.segment_count,
+        "SELECT l.content_hash, l.source_path, l.format, l.title, l.collection, l.segment_count,
                 COALESCE(c.cnt, 0) AS chunk_count,
                 l.status, l.error, l.created_at, l.updated_at
          FROM leaves l
@@ -218,15 +230,41 @@ pub async fn list_leaves(
            ON c.leaf_id = l.content_hash
          WHERE ($1::text IS NULL OR l.format = $1)
            AND ($2::text IS NULL OR l.status = $2)
+           AND ($3::text[] IS NULL OR l.collection = ANY($3))
+           AND ($4::text[] IS NULL OR EXISTS (
+             SELECT 1 FROM leaf_tags lt
+             WHERE lt.leaf_id = l.content_hash AND lt.tag = ANY($4)
+           ))
          ORDER BY l.updated_at DESC
-         LIMIT $3",
+         LIMIT $5",
     )
     .bind(format)
     .bind(status)
+    .bind(&coll_vec)
+    .bind(&tags_vec)
     .bind(limit)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(Into::into).collect())
+
+    let mut records = Vec::with_capacity(rows.len());
+    for r in rows {
+        let leaf_tags = leaf_tags(pool, &r.content_hash).await?;
+        records.push(LeafRecord {
+            content_hash: r.content_hash,
+            source_path: r.source_path,
+            format: r.format,
+            title: r.title,
+            collection: r.collection,
+            tags: leaf_tags,
+            segment_count: r.segment_count,
+            chunk_count: r.chunk_count,
+            status: r.status,
+            error: r.error,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        });
+    }
+    Ok(records)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -289,9 +327,13 @@ struct SearchRow {
 pub async fn search(
     pool: &PgPool,
     query_embedding: &[f32],
+    collections: Option<&[String]>,
+    tags: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<SearchResult>> {
     let hv = f32_to_halfvec(query_embedding);
+    let coll_vec: Option<Vec<String>> = collections.map(|c| c.to_vec());
+    let tags_vec: Option<Vec<String>> = tags.map(|t| t.to_vec());
     let rows = sqlx::query_as::<_, SearchRow>(
         "SELECT c.id, c.leaf_id, c.segment_index, c.chunk_index, c.chunk_label,
                 c.content_text, l.source_path,
@@ -299,11 +341,18 @@ pub async fn search(
          FROM chunks c
          JOIN leaves l ON l.content_hash = c.leaf_id
          WHERE l.status = 'ready'
+           AND ($3::text[] IS NULL OR l.collection = ANY($3))
+           AND ($4::text[] IS NULL OR EXISTS (
+             SELECT 1 FROM leaf_tags lt
+             WHERE lt.leaf_id = l.content_hash AND lt.tag = ANY($4)
+           ))
          ORDER BY c.embedding <=> $1::halfvec
          LIMIT $2",
     )
     .bind(&hv)
     .bind(limit)
+    .bind(&coll_vec)
+    .bind(&tags_vec)
     .fetch_all(pool)
     .await?;
 
@@ -446,4 +495,42 @@ pub async fn read_segment(
     .fetch_optional(pool)
     .await?;
     Ok(row.map(Into::into))
+}
+
+// ── Tags ──
+
+pub async fn leaf_tags(pool: &PgPool, leaf_id: &str) -> Result<Vec<String>> {
+    let tags = sqlx::query_scalar::<_, String>(
+        "SELECT tag FROM leaf_tags WHERE leaf_id = $1 ORDER BY tag",
+    )
+    .bind(leaf_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(tags)
+}
+
+pub async fn set_leaf_tags(pool: &PgPool, leaf_id: &str, tags: &[String]) -> Result<()> {
+    sqlx::query("DELETE FROM leaf_tags WHERE leaf_id = $1")
+        .bind(leaf_id)
+        .execute(pool)
+        .await?;
+    for tag in tags {
+        sqlx::query("INSERT INTO leaf_tags (leaf_id, tag) VALUES ($1, $2)")
+            .bind(leaf_id)
+            .bind(tag)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+// ── Collections ──
+
+pub async fn list_collections(pool: &PgPool) -> Result<Vec<String>> {
+    let names = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT collection FROM leaves WHERE status = 'ready' ORDER BY collection",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(names)
 }

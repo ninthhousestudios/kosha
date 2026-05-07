@@ -13,6 +13,8 @@ use crate::store;
 pub struct IngestResult {
     pub content_hash: String,
     pub source_path: String,
+    pub collection: String,
+    pub tags: Vec<String>,
     pub segments: u32,
     pub chunks: u32,
     pub skipped: bool,
@@ -30,12 +32,14 @@ pub async fn ingest_file(
     embedder: &dyn EmbedProvider,
     path: &Path,
     chunk_cfg: &ChunkConfig,
+    collection: &str,
+    tags: &[String],
 ) -> anyhow::Result<IngestResult> {
     let content = tokio::fs::read(path).await?;
     let source_path = path.to_string_lossy().to_string();
 
     let content_hash = blake3::hash(&content).to_hex().to_string();
-    tracing::info!(%content_hash, %source_path, "checking leaf");
+    tracing::info!(%content_hash, %source_path, %collection, "checking leaf");
 
     match store::leaf_status(pool, &content_hash).await? {
         Some(ref s) if s == "ready" => {
@@ -43,6 +47,8 @@ pub async fn ingest_file(
             return Ok(IngestResult {
                 content_hash,
                 source_path,
+                collection: collection.to_string(),
+                tags: tags.to_vec(),
                 segments: 0,
                 chunks: 0,
                 skipped: true,
@@ -65,9 +71,14 @@ pub async fn ingest_file(
         &source_path,
         decomposer.format_name(),
         None,
+        collection,
         segment_count,
     )
     .await?;
+
+    if !tags.is_empty() {
+        store::set_leaf_tags(pool, &content_hash, tags).await?;
+    }
 
     match ingest_segments(pool, embedder, &content_hash, &segments, chunk_cfg).await {
         Ok(total_chunks) => {
@@ -76,6 +87,8 @@ pub async fn ingest_file(
             Ok(IngestResult {
                 content_hash,
                 source_path,
+                collection: collection.to_string(),
+                tags: tags.to_vec(),
                 segments: segment_count as u32,
                 chunks: total_chunks,
                 skipped: false,

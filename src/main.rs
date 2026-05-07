@@ -29,6 +29,12 @@ enum Commands {
     Ingest {
         /// Path to a file or directory to ingest.
         path: String,
+        /// Collection to assign the leaf to.
+        #[arg(long, default_value = "default")]
+        collection: String,
+        /// Tags to attach to the leaf (repeatable).
+        #[arg(long = "tag", num_args = 1)]
+        tags: Vec<String>,
     },
 }
 
@@ -49,7 +55,9 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Serve) {
         Commands::Serve => run_serve(cfg).await,
-        Commands::Ingest { path } => run_ingest(cfg, path).await,
+        Commands::Ingest { path, collection, tags } => {
+            run_ingest(cfg, path, &collection, &tags).await
+        }
     }
 }
 
@@ -78,7 +86,7 @@ async fn run_serve(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-async fn run_ingest(cfg: Config, path: String) -> Result<()> {
+async fn run_ingest(cfg: Config, path: String, collection: &str, tags: &[String]) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool)
         .await
@@ -93,14 +101,22 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     };
 
     let file_path = std::path::Path::new(&path);
-    let result = kosha::ingest::ingest_file(&pool, embedder.as_ref(), file_path, &chunk_cfg).await?;
+    let result = kosha::ingest::ingest_file(
+        &pool,
+        embedder.as_ref(),
+        file_path,
+        &chunk_cfg,
+        collection,
+        tags,
+    )
+    .await?;
 
     if result.skipped {
         eprintln!("kosha: already ingested (hash {})", result.content_hash);
     } else {
         eprintln!(
-            "kosha: ingested {} ({} segments, {} chunks, hash {})",
-            result.source_path, result.segments, result.chunks, result.content_hash
+            "kosha: ingested {} into '{}' ({} segments, {} chunks, hash {})",
+            result.source_path, result.collection, result.segments, result.chunks, result.content_hash
         );
     }
 

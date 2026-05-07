@@ -9,6 +9,8 @@ use crate::store;
 pub struct LeavesArgs {
     pub format: Option<String>,
     pub status: Option<String>,
+    pub collections: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
     pub limit: Option<i64>,
 }
 
@@ -24,6 +26,8 @@ pub struct LeafSummary {
     pub source_path: String,
     pub format: String,
     pub title: Option<String>,
+    pub collection: String,
+    pub tags: Vec<String>,
     pub segment_count: i32,
     pub chunk_count: i64,
     pub status: String,
@@ -37,6 +41,8 @@ pub async fn handle(pool: &PgPool, args: LeavesArgs) -> Result<LeavesOutput> {
         pool,
         args.format.as_deref(),
         args.status.as_deref(),
+        args.collections.as_deref(),
+        args.tags.as_deref(),
         limit,
     )
     .await?;
@@ -48,6 +54,8 @@ pub async fn handle(pool: &PgPool, args: LeavesArgs) -> Result<LeavesOutput> {
             source_path: r.source_path,
             format: r.format,
             title: r.title,
+            collection: r.collection,
+            tags: r.tags,
             segment_count: r.segment_count,
             chunk_count: r.chunk_count,
             status: r.status,
