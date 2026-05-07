@@ -16,7 +16,8 @@ pub struct Config {
     pub embed_api_key: Option<String>,
     pub embed_batch_size: usize,
     // Chunking
-    pub chunk_max_tokens: usize,
+    pub chunk_target_tokens: usize,
+    pub chunk_tolerance_tokens: usize,
     pub chunk_overlap_tokens: usize,
 }
 
@@ -63,20 +64,25 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(32);
 
-        let chunk_max_tokens: usize = std::env::var("KOSHA_CHUNK_MAX_TOKENS")
+        let chunk_target_tokens: usize = std::env::var("KOSHA_CHUNK_TARGET_TOKENS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(512);
+
+        let chunk_tolerance_tokens: usize = std::env::var("KOSHA_CHUNK_TOLERANCE_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(256);
 
         let chunk_overlap_tokens: usize = std::env::var("KOSHA_CHUNK_OVERLAP_TOKENS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
-        assert!(chunk_max_tokens > 0, "KOSHA_CHUNK_MAX_TOKENS must be > 0");
+        assert!(chunk_target_tokens > 0, "KOSHA_CHUNK_TARGET_TOKENS must be > 0");
         assert!(
-            chunk_overlap_tokens < chunk_max_tokens,
-            "KOSHA_CHUNK_OVERLAP_TOKENS ({chunk_overlap_tokens}) must be < KOSHA_CHUNK_MAX_TOKENS ({chunk_max_tokens})"
+            chunk_tolerance_tokens < chunk_target_tokens,
+            "KOSHA_CHUNK_TOLERANCE_TOKENS ({chunk_tolerance_tokens}) must be < KOSHA_CHUNK_TARGET_TOKENS ({chunk_target_tokens})"
         );
 
         Self {
@@ -92,7 +98,8 @@ impl Config {
             embed_dimension,
             embed_api_key,
             embed_batch_size,
-            chunk_max_tokens,
+            chunk_target_tokens,
+            chunk_tolerance_tokens,
             chunk_overlap_tokens,
         }
     }

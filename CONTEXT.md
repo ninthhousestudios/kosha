@@ -13,7 +13,7 @@ A format-native subdivision of a leaf — a page (PDF), chapter (epub), heading-
 _Avoid_: page (too format-specific), section (ambiguous)
 
 **Chunk**:
-A uniform-sized subdivision of a segment, optimized for embedding quality and token-predictable retrieval. The unit that gets embedded, searched against, and cited. Segments with varied lengths are split into chunks of consistent size; a short segment may be a single chunk.
+A structurally-coherent subdivision of a segment, target-sized for embedding quality and bounded for retrieval predictability. Boundary candidates respect document structure (headings, code fences, paragraph breaks) within a configurable target ± tolerance window. The unit that gets embedded, searched against, and cited. A short segment may be a single chunk.
 _Avoid_: block, fragment, window
 
 **Citation**:

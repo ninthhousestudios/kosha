@@ -87,7 +87,8 @@ async fn run_ingest(cfg: Config, path: String) -> Result<()> {
     let embedder = build_embedder(&cfg).await?;
 
     let chunk_cfg = ChunkConfig {
-        max_tokens: cfg.chunk_max_tokens,
+        target_tokens: cfg.chunk_target_tokens,
+        tolerance_tokens: cfg.chunk_tolerance_tokens,
         overlap_tokens: cfg.chunk_overlap_tokens,
     };
 
