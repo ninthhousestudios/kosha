@@ -1,135 +1,172 @@
-# Cloud ingest workflow (RunPod)
+# Cloud ingest how-to (RunPod)
 
-Run `kosha ingest` on a GPU instance, dump the database, restore locally. Embedding is the bottleneck — GPU makes it 10-50x faster.
+Run `kosha ingest` on a GPU instance, dump the database, restore locally. Embedding is the bottleneck — GPU makes it 10-50x faster than CPU.
 
-## Pod configuration
+## Step 1: Create the pod
 
-- **Image**: `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04`
-- **GPU**: L40S (48GB VRAM) or L4 — the Qwen3-VL-2B model fits easily
-- **vCPU**: 12+
-- **RAM**: 32GB+
-- **Disk**: 40GB+ (postgres WAL bloat from bulk inserts can eat 10-20GB)
+Go to [runpod.io](https://runpod.io) → Pods → Deploy.
 
-Do NOT use Docker Hub images (rate-limited on RunPod) or Ubuntu 20.04 (ships PG 12, pgvector needs 13+).
+**Pod settings:**
 
-## Setup script
+| Setting | Value | Why |
+|---|---|---|
+| Image | `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04` | Has CUDA toolkit (needed for candle GPU build). The `-devel` variant includes nvcc and headers. |
+| GPU | L40S (48GB) or L4 (24GB) | Qwen3-VL-2B fits easily on either. L40S is faster. |
+| vCPU | 12+ | Rust compilation is CPU-bound. More cores = faster build. |
+| RAM | 32GB+ | Postgres + model loading. |
+| Disk | 40GB+ | OS ~15GB, Rust build cache ~5GB, postgres data + WAL ~10-15GB, your corpus. |
+
+Do NOT use Docker Hub images (rate-limited on RunPod) or Ubuntu 20.04 (ships PG 12, pgvector requires 13+).
+
+## Step 2: Upload your corpus to the pod
+
+Once the pod is running, open a terminal (web terminal or SSH).
+
+**Option A: runpodctl (best for large files)**
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+# On your local machine — install runpodctl if you haven't:
+# https://github.com/runpod/runpodctl
 
-# ── System deps ─────────────────────────────────────────────────────
-apt-get update -qq
-apt-get install -y -qq postgresql postgresql-contrib postgresql-server-dev-all \
-    build-essential git curl pkg-config libssl-dev \
-    libpoppler-glib-dev libcairo2-dev
+# Tar up your corpus
+tar czf corpus.tar.gz ~/library/
 
-# ── Rust toolchain ──────────────────────────────────────────────────
-if ! command -v cargo &> /dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-export PATH="$HOME/.cargo/bin:$PATH"
-# RunPod images ship old Rust; edition2024 needs 1.85+
-rustup update stable
-
-# ── pgvector ────────────────────────────────────────────────────────
-PG_SHAREDIR=$(pg_config --sharedir 2>/dev/null || echo "")
-if [ -n "$PG_SHAREDIR" ] && [ -f "$PG_SHAREDIR/extension/vector.control" ]; then
-    echo "pgvector already installed"
-else
-    cd /tmp
-    git clone --branch v0.8.0 --depth 1 https://github.com/pgvector/pgvector.git
-    cd pgvector && make && make install
-fi
-
-# ── Start postgres ──────────────────────────────────────────────────
-pg_isready -q 2>/dev/null || pg_ctlcluster $(pg_lsclusters -h | awk '{print $1, $2}') start
-sleep 2
-
-# ── Postgres setup ──────────────────────────────────────────────────
-su - postgres -c "psql -c \"ALTER USER postgres PASSWORD 'postgres';\""
-su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='kosha'\"" | grep -q 1 || \
-    su - postgres -c "createdb kosha"
-su - postgres -c "psql -d kosha -c 'CREATE EXTENSION IF NOT EXISTS vector;'"
-su - postgres -c "psql -c \"ALTER SYSTEM SET max_wal_size = '2GB';\""
-su - postgres -c "psql -c 'SELECT pg_reload_conf();'"
-echo "Postgres ready: kosha with pgvector"
-
-# ── Clone and build kosha ──────────────────────────────────────────
-WORK_DIR="${WORK_DIR:-/workspace}"
-cd "$WORK_DIR"
-if [ ! -d kosha ]; then
-    git clone <your-kosha-repo-url> kosha
-fi
-cd kosha
-
-cat > .env <<'EOF'
-DATABASE_URL=postgresql://postgres:postgres@localhost/kosha
-EOF
-
-echo "Building kosha with CUDA support..."
-cargo build --release --features cuda
-echo "Built: $WORK_DIR/kosha/target/release/kosha"
+# Send to the pod (gives you a code to receive on the other end)
+runpodctl send corpus.tar.gz
 ```
 
-## Running ingest
+```bash
+# On the pod:
+runpodctl receive <code>
+mkdir -p /workspace/corpus
+tar xzf corpus.tar.gz -C /workspace/corpus/
+```
+
+**Option B: scp**
+
+Find SSH details in the RunPod pod page (Connect → SSH).
+
+```bash
+# From your local machine:
+scp -P <port> -r ~/library/ root@<pod-ip>:/workspace/corpus/
+```
+
+**Option C: git (if your corpus is in a repo)**
+
+```bash
+# On the pod:
+git clone <your-corpus-repo> /workspace/corpus
+```
+
+## Step 3: Clone kosha and run setup
+
+```bash
+# On the pod:
+git clone <your-kosha-repo-url> /workspace/kosha
+bash /workspace/kosha/scripts/runpod-setup.sh
+```
+
+The setup script handles everything: system deps (postgres, pgvector, poppler, cairo), Rust toolchain update, database creation, and `cargo build --release --features cuda`. First build takes ~5-10 minutes.
+
+If you need to re-run setup (e.g. pod was stopped and restarted), the script is idempotent — it skips steps that are already done.
+
+## Step 4: Ingest
 
 ```bash
 cd /workspace/kosha
 
-# Copy your corpus to the pod first (rsync, scp, runpodctl send, etc.)
-# Then ingest:
+# Ingest a directory recursively
 ./target/release/kosha --device gpu ingest -r /workspace/corpus/ \
     --collection my-docs --tag batch-2026-05
 
+# Or ingest specific files
+./target/release/kosha --device gpu ingest paper.pdf thesis.epub
+
 # The --device flag:
-#   gpu  — use CUDA (fails if no GPU or not compiled with cuda feature)
+#   gpu  — force CUDA (fails if no GPU available)
 #   cpu  — force CPU
 #   auto — try CUDA, fall back to CPU (default)
 ```
 
-## Dumping and restoring
+kosha prints progress per file: segment and chunk counts, or "skipped" for files already ingested (same BLAKE3 hash). You can safely re-run ingest if it gets interrupted.
+
+## Step 5: Dump the database
 
 ```bash
-# On the pod: dump the kosha database
+# On the pod:
 pg_dump -U postgres -Fc kosha > /workspace/kosha-dump.pg
 
-# Transfer to local machine
-# Option A: runpodctl
-runpodctl send /workspace/kosha-dump.pg
-# Option B: scp
-scp -P <port> root@<pod-ip>:/workspace/kosha-dump.pg .
-
-# Locally: restore into your kosha database
-pg_restore -U <user> -d kosha --clean --if-exists kosha-dump.pg
-# Or create fresh:
-createdb kosha_cloud
-psql -d kosha_cloud -c 'CREATE EXTENSION IF NOT EXISTS vector;'
-pg_restore -U <user> -d kosha_cloud kosha-dump.pg
+# Check the size — if it's unexpectedly large, vacuum first:
+su - postgres -c "psql -d kosha -c 'VACUUM FULL; CHECKPOINT;'"
+pg_dump -U postgres -Fc kosha > /workspace/kosha-dump.pg
 ```
+
+## Step 6: Download the dump
+
+**Option A: runpodctl**
+
+```bash
+# On the pod:
+runpodctl send /workspace/kosha-dump.pg
+
+# On your local machine:
+runpodctl receive <code>
+```
+
+**Option B: scp**
+
+```bash
+# From your local machine:
+scp -P <port> root@<pod-ip>:/workspace/kosha-dump.pg .
+```
+
+## Step 7: Restore locally
+
+```bash
+# Into an existing kosha database (replaces contents):
+pg_restore -U <user> -d kosha --clean --if-exists kosha-dump.pg
+
+# Or into a fresh database:
+createdb kosha
+psql -d kosha -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+pg_restore -U <user> -d kosha kosha-dump.pg
+```
+
+Verify it worked:
+
+```bash
+export DATABASE_URL="postgresql://<user>:<pass>@localhost/kosha"
+kosha list
+```
+
+## Step 8: Terminate the pod
+
+Don't forget — RunPod charges by the hour. Once you've downloaded the dump, terminate the pod.
 
 ## Known gotchas
 
-1. **Rust version**: RunPod images ship old Rust (1.75ish). Kosha uses edition 2024 which needs 1.85+. Always `rustup update stable` first.
+1. **Rust version**: RunPod images ship old Rust (~1.75). kosha uses edition 2024 which needs 1.85+. The setup script runs `rustup update stable` to handle this.
 
-2. **Disk bloat**: Postgres WAL + dead tuples from bulk inserts. The `max_wal_size = '2GB'` setting helps. After large ingests, run `VACUUM FULL` and `CHECKPOINT`.
+2. **Disk bloat**: Postgres WAL + dead tuples from bulk inserts. The setup script sets `max_wal_size = '2GB'`. After large ingests, `VACUUM FULL` + `CHECKPOINT` reclaims space. A 1000-document ingest might temporarily use 15-20GB of disk for WAL alone.
 
-3. **OpenBLAS thread bomb**: If anything pulls in numpy/scipy (unlikely for kosha, but if debugging with Python tools), set `OPENBLAS_NUM_THREADS=4` or it tries 64 threads and crashes on limited-vCPU pods.
+3. **Postgres auth**: Default is peer auth over unix sockets. The setup script sets a password for TCP connections via `DATABASE_URL`. Don't change pg_hba.conf `peer → md5` for the postgres OS user — that breaks `su - postgres` commands that the setup script uses.
 
-4. **Postgres auth**: Default is peer auth over unix sockets. The setup script uses `ALTER USER` + password in DATABASE_URL for TCP connections. If you get auth errors, check pg_hba.conf — changing peer to md5 for the postgres OS user breaks `su - postgres` commands.
+4. **Docker Hub rate limiting**: RunPod can't pull from Docker Hub reliably. Always use RunPod's own base images (the `runpod/pytorch:*` images).
 
-5. **Docker Hub rate limiting**: Don't try to pull images from Docker Hub on RunPod. Use RunPod's own base images.
+5. **libpoppler / libcairo**: Required for PDF decomposition. Without them, `cargo build` fails on poppler-sys / cairo-sys. The setup script installs both.
 
-6. **libpoppler / libcairo**: Required for PDF decomposition. The `apt-get install libpoppler-glib-dev libcairo2-dev` line in setup covers this. Without them, `cargo build` fails on poppler-sys/cairo-sys.
+6. **CUDA build time**: `--features cuda` pulls in candle CUDA kernel compilation, which needs nvcc from the CUDA toolkit. The recommended RunPod image (`-devel` variant) includes this. First build is ~5-10 min; subsequent builds are fast (cargo cache).
 
-7. **CUDA + candle**: The `--features cuda` flag enables candle's CUDA backend. This pulls in CUDA kernel compilation at build time, which needs the CUDA toolkit — the recommended RunPod image includes it. Build time is ~5-10 min on first run, cached after.
+7. **Model download**: First ingest downloads the Qwen3-VL-2B model from HuggingFace (~4GB). This happens automatically but takes a few minutes on first run.
+
+8. **OpenBLAS thread bomb**: If you install any Python tools that pull in numpy/scipy for debugging, set `OPENBLAS_NUM_THREADS=4` first, or it tries to spawn 64 threads and crashes on 12-vCPU pods.
 
 ## Cost estimates
 
-| Corpus size | Estimated GPU time | Pod cost (L40S ~$0.70/hr) |
+| Corpus | Estimated GPU time | Pod cost (L40S ~$0.70/hr) |
 |---|---|---|
 | 100 documents | ~5-10 min | ~$0.10 |
 | 1000 documents | ~30-60 min | ~$0.50 |
 | 10000 documents | ~4-8 hours | ~$4-6 |
 
-GPU time depends heavily on document sizes and segment counts. PDFs with many pages take longer than plain markdown files.
+Times vary with document size. A 500-page PDF has 500 segments to embed; a markdown file might have 5. Budget for the upper end.

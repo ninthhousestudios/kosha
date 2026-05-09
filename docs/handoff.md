@@ -1,49 +1,39 @@
 # kosha — handoff
 
-Date: 2026-04-27 (evening)
+Date: 2026-05-07
 
-## what's ready
+## Pick up next
 
-### candle BF16 CPU matmul — PR submitted
+### 1. Retag / move command
 
-PR: https://github.com/huggingface/candle/pull/3503
-Fork: ninthhousestudios/candle, branch `bf16-cpu-matmul`, cloned at `~/soft/candle`
-All candle-core tests pass. Covers gemm, MKL, and Accelerate backends.
+Currently, re-ingesting an already-ready leaf skips it — so you can't change collection or tags after initial ingest. Need either:
+- A `kosha retag <hash> --collection <name> --tag <tag>` CLI command
+- Or an `kosha_retag` MCP tool
+This is just store-level UPDATE + set_leaf_tags, no re-embedding needed.
 
-### gemm-bf16 — local fork working
+### 2. Format decomposers — epub, markdown/HTML (kosha/14, kosha/15)
 
-`~/soft/gemm` on branch `bf16` (checked out from PR #40 by gicrisf).
-Tests pass, benchmarked: 1.1-2.8x faster than the upcast approach we used in the candle PR.
-This is the proper root fix — converts during packing phase instead of whole-tensor upcast.
+The Decomposer trait takes `&[u8]` and returns `SegmentContent::Text` or `SegmentContent::Image`. File extension dispatch is in `ingest.rs::decomposer_for()`.
 
-## pick up next
+### 3. Hybrid search (kosha/22)
 
-1. **Wire local gemm-bf16 into candle** — point candle's gemm dependency at `~/soft/gemm` (or a published fork), enable `bf16` feature, then simplify the candle matmul code to just add `DType::BF16` to the allow-list instead of the cast wrapper. This gives us the performance win from mixed-precision packing.
+Lexical leg + RRF fusion. Currently search is vector-only.
 
-2. **Test full pipeline** — with BF16 matmul working, re-run fastembed Qwen3-VL-Embedding-2B in BF16 mode and verify embedding quality matches the PyTorch BF16 baseline (8x relevant/irrelevant ratio).
+### 4. HttpEmbedder image support
 
-3. **Benchmark Qwen3-VL text quality vs BGE-M3** — needed to decide single-model vs dual-model architecture.
+The `embed_image_bytes` method returns "not supported" for the HTTP provider. Low priority — local embedder works.
 
-4. **RunPod batch embedding** — CLI workflow for GPU batch inference on image-heavy books.
+## Task graph
 
-## local repos
+PRD is kosha/7. Done: 8, 9, 10, 11, 12, 13, 20, 23. Remaining: 14 (epub), 15 (md/html), 16 (kosha_ingest MCP tool), 17 (directory ingest), 18 (systemd unit), 21 (LLM cache), 22 (hybrid search), 24 (explain mode), 25 (graceful tiering doc).
 
-| Repo | Path | Branch | State |
-|------|------|--------|-------|
-| candle (fork) | ~/soft/candle | bf16-cpu-matmul | PR submitted |
-| gemm (PR #40) | ~/soft/gemm | bf16 | tested, working |
-| fastembed (fork) | ~/soft/fastembed-local | — | F16 dtype fixes, PR #248 filed |
-| fastembed test | ~/soft/fastembed-qwen3-test | — | test harness |
-| Qwen3-VL weights | ~/soft/Qwen3-VL-Embedding/ | — | PyTorch path works |
+Collections + tags feature is complete and verified (commit 70e7a1c) but not yet tracked in yojana.
 
-## blockers
+## Context the next session needs
 
-- Both upstream PRs (candle #3503, gemm #40) waiting on maintainers — but local forks work
-- Project dir rename vedakosha → kosha pending
-
-## context
-
-- GitHub account for contributions: ninthhousestudios
-- Josh's machine: 14GB RAM, AMD Radeon 680M (integrated), CPU-only, Arch Linux
-- Python ML: use uv, not system Python 3.14
-- The qartez rewrite is separate, lower-priority
+- Collections: single collection per leaf (TEXT column, default 'default'), tags via `leaf_tags` join table
+- Search/list accept `collections: Option<Vec<String>>` and `tags: Option<Vec<String>>`
+- New `kosha_collections` MCP tool lists distinct collection names
+- CLI: `kosha ingest <path> --collection <name> --tag <tag>` (tag is repeatable)
+- DB has test data: 5 leaves across 4 collections (astro, biz, default, yoga)
+- `.kosha/.env` now exists at `~/.kosha/.env` with `DATABASE_URL=postgres://josh@localhost/kosha`

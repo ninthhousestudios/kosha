@@ -22,7 +22,7 @@ struct Cli {
     device: String,
 
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
     let device = resolve_device(&cli.device)?;
 
-    match cli.command.unwrap_or(Commands::Serve) {
+    match cli.command {
         Commands::Serve => run_serve(cfg, &device).await,
         Commands::List { leaf, collection, format, tags } => {
             run_list(cfg, leaf, collection, format, &tags).await
