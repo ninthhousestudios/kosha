@@ -197,7 +197,3 @@ docs/
   cloud-ingest.md  RunPod GPU workflow
 ```
 
-## License
-
-MPL-2.0
-
