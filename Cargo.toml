@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Document intelligence layer for the manas ecosystem."
 license = "AGPL-3.0"
-repository = "https://github.com/ninthhousestudios/manas"
+repository = "https://github.com/ninthhousestudios/kosha"
 publish = false
 
 [[bin]]
