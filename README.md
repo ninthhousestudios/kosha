@@ -1,6 +1,6 @@
 # kosha
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 Document intelligence for the [manas](https://github.com/ninthhousestudios/manas) ecosystem. Decomposes documents into segments, embeds them into a shared vector space, and exposes semantic search and citation tools over MCP.
 
