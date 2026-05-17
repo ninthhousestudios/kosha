@@ -3,7 +3,7 @@ name = "kosha"
 version = "0.1.0"
 edition = "2024"
 description = "Document intelligence layer for the manas ecosystem."
-license = "MPL-2.0"
+license = "AGPL-3.0"
 repository = "https://github.com/ninthhousestudios/manas"
 publish = false
 
