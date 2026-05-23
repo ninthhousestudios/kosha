@@ -11,6 +11,7 @@ use kosha::{
     db,
     embed::{Device, EmbedProvider, HttpEmbedder, LocalEmbedder},
     mcp::KoshaServer,
+    tools::SearchArgs,
 };
 
 /// kosha: document intelligence MCP server.
@@ -58,6 +59,23 @@ enum Commands {
         #[arg(long = "tag", num_args = 1)]
         tags: Vec<String>,
     },
+    /// Semantic search over ingested documents.
+    Search {
+        /// Natural language query.
+        query: String,
+        /// Filter by collection (repeatable).
+        #[arg(long = "collection", num_args = 1)]
+        collections: Vec<String>,
+        /// Filter by tag (repeatable).
+        #[arg(long = "tag", num_args = 1)]
+        tags: Vec<String>,
+        /// Max results to return.
+        #[arg(long, default_value = "5")]
+        limit: i64,
+        /// Output raw JSON instead of formatted text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -84,6 +102,9 @@ async fn main() -> Result<()> {
         }
         Commands::Ingest { paths, recursive, collection, tags } => {
             run_ingest(cfg, &paths, recursive, &collection, &tags, &device).await
+        }
+        Commands::Search { query, collections, tags, limit, json } => {
+            run_search(cfg, query, collections, tags, limit, json, &device).await
         }
     }
 }
@@ -271,6 +292,52 @@ async fn run_ingest(
 
     if errors > 0 {
         anyhow::bail!("{errors} file(s) failed to ingest");
+    }
+
+    Ok(())
+}
+
+async fn run_search(
+    cfg: Config,
+    query: String,
+    collections: Vec<String>,
+    tags: Vec<String>,
+    limit: i64,
+    json: bool,
+    device: &Device,
+) -> Result<()> {
+    let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
+    db::run_migrations(&pool).await.context("running migrations")?;
+
+    let embedder = build_embedder(&cfg, device).await?;
+
+    let args = SearchArgs {
+        query,
+        collections: if collections.is_empty() { None } else { Some(collections) },
+        tags: if tags.is_empty() { None } else { Some(tags) },
+        limit: Some(limit),
+    };
+
+    let output = kosha::tools::search::handle(&pool, embedder.as_ref(), args).await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    if output.results.is_empty() {
+        println!("No results for: {}", output.query);
+        return Ok(());
+    }
+
+    println!("{} result(s) for: {}\n", output.count, output.query);
+    for (i, hit) in output.results.iter().enumerate() {
+        println!("{}. [score: {:.4}] {}", i + 1, hit.score, hit.citation.source_path);
+        println!("   {} (chunk {})", hit.citation.chunk_label, hit.citation.chunk_index);
+        let preview: String = hit.content.chars().take(200).collect();
+        let ellipsis = if hit.content.len() > 200 { "..." } else { "" };
+        println!("   {}{}\n", preview, ellipsis);
     }
 
     Ok(())
