@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use sqlx::PgPool;
 
@@ -101,32 +102,43 @@ pub async fn ingest_file(
         None => {}
     }
 
+    let is_pdf = path.extension().and_then(|e| e.to_str()) == Some("pdf");
+
+    if is_pdf {
+        ingest_pdf_pipelined(pool, embedder, &content, &content_hash, &source_path, chunk_cfg, collection, tags).await
+    } else {
+        ingest_generic(pool, embedder, path, &content, &content_hash, &source_path, chunk_cfg, collection, tags).await
+    }
+}
+
+async fn ingest_generic(
+    pool: &PgPool,
+    embedder: &dyn EmbedProvider,
+    path: &Path,
+    content: &[u8],
+    content_hash: &str,
+    source_path: &str,
+    chunk_cfg: &ChunkConfig,
+    collection: &str,
+    tags: &[String],
+) -> anyhow::Result<IngestResult> {
     let decomposer = decomposer_for(path);
-    let segments = decomposer.decompose(&content, &source_path)?;
+    let format_name = decomposer.format_name();
+    let segments = decomposer.decompose(content, source_path)?;
     let segment_count = segments.len() as i32;
 
-    store::insert_leaf(
-        pool,
-        &content_hash,
-        &source_path,
-        decomposer.format_name(),
-        None,
-        collection,
-        segment_count,
-    )
-    .await?;
-
+    store::insert_leaf(pool, content_hash, source_path, format_name, None, collection, segment_count).await?;
     if !tags.is_empty() {
-        store::set_leaf_tags(pool, &content_hash, tags).await?;
+        store::set_leaf_tags(pool, content_hash, tags).await?;
     }
 
-    match ingest_segments(pool, embedder, &content_hash, &segments, chunk_cfg).await {
+    match ingest_segments(pool, embedder, content_hash, &segments, chunk_cfg).await {
         Ok(total_chunks) => {
-            store::mark_leaf_ready(pool, &content_hash).await?;
+            store::mark_leaf_ready(pool, content_hash).await?;
             tracing::info!(%content_hash, segments = segment_count, chunks = total_chunks, "ingest complete");
             Ok(IngestResult {
-                content_hash,
-                source_path,
+                content_hash: content_hash.to_string(),
+                source_path: source_path.to_string(),
                 collection: collection.to_string(),
                 tags: tags.to_vec(),
                 segments: segment_count as u32,
@@ -135,10 +147,161 @@ pub async fn ingest_file(
             })
         }
         Err(e) => {
-            let _ = store::mark_leaf_error(pool, &content_hash, &e.to_string()).await;
+            let _ = store::mark_leaf_error(pool, content_hash, &e.to_string()).await;
             Err(e)
         }
     }
+}
+
+async fn ingest_pdf_pipelined(
+    pool: &PgPool,
+    embedder: &dyn EmbedProvider,
+    content: &[u8],
+    content_hash: &str,
+    source_path: &str,
+    chunk_cfg: &ChunkConfig,
+    collection: &str,
+    tags: &[String],
+) -> anyhow::Result<IngestResult> {
+    let (tx, rx) = mpsc::sync_channel::<crate::decompose::Segment>(8);
+
+    let content_owned = content.to_vec();
+    let decompose_handle = tokio::task::spawn_blocking(move || {
+        let decomposer = PdfDecomposer;
+        decomposer.decompose_streamed(&content_owned, tx)
+    });
+
+    // We don't know segment_count up front for the pipelined path.
+    // Insert leaf with 0, update after we finish.
+    store::insert_leaf(pool, content_hash, source_path, "pdf", None, collection, 0).await?;
+    if !tags.is_empty() {
+        store::set_leaf_tags(pool, content_hash, tags).await?;
+    }
+
+    let mut total_chunks = 0u32;
+    let mut segment_count = 0i32;
+    let mut ingest_error: Option<anyhow::Error> = None;
+
+    for seg in rx {
+        segment_count += 1;
+        match ingest_one_segment(pool, embedder, content_hash, &seg, chunk_cfg).await {
+            Ok(chunks) => total_chunks += chunks,
+            Err(e) => {
+                ingest_error = Some(e);
+                break;
+            }
+        }
+    }
+
+    // Wait for the decompose thread to finish
+    let decompose_result = decompose_handle.await?;
+
+    if let Some(e) = ingest_error {
+        let _ = store::mark_leaf_error(pool, content_hash, &e.to_string()).await;
+        return Err(e);
+    }
+
+    if let Err(e) = decompose_result {
+        let _ = store::mark_leaf_error(pool, content_hash, &e.to_string()).await;
+        return Err(e);
+    }
+
+    store::update_leaf_segment_count(pool, content_hash, segment_count).await?;
+    store::mark_leaf_ready(pool, content_hash).await?;
+    tracing::info!(%content_hash, segments = segment_count, chunks = total_chunks, "ingest complete");
+
+    Ok(IngestResult {
+        content_hash: content_hash.to_string(),
+        source_path: source_path.to_string(),
+        collection: collection.to_string(),
+        tags: tags.to_vec(),
+        segments: segment_count as u32,
+        chunks: total_chunks,
+        skipped: false,
+    })
+}
+
+async fn ingest_one_segment(
+    pool: &PgPool,
+    embedder: &dyn EmbedProvider,
+    content_hash: &str,
+    seg: &crate::decompose::Segment,
+    chunk_cfg: &ChunkConfig,
+) -> anyhow::Result<u32> {
+    use crate::decompose::SegmentContent;
+
+    let mut chunk_count = 0u32;
+
+    match &seg.content {
+        SegmentContent::Text(text) => {
+            let segment_id = store::insert_segment(
+                pool,
+                content_hash,
+                seg.index as i32,
+                &seg.label,
+                Some(text),
+            )
+            .await?;
+
+            let chunks = chunk::chunk_segment(text, &seg.label, chunk_cfg);
+            let chunk_texts: Vec<String> =
+                chunks.iter().map(|c| c.content.clone()).collect();
+            let embeddings = embedder.embed_batch(chunk_texts).await?;
+
+            for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
+                store::insert_chunk(
+                    pool,
+                    segment_id,
+                    ch.index as i32,
+                    content_hash,
+                    seg.index as i32,
+                    &ch.label,
+                    Some(&ch.content),
+                    emb,
+                    embedder.provider_name(),
+                    embedder.model_name(),
+                    embedder.dimension() as i32,
+                )
+                .await?;
+                chunk_count += 1;
+            }
+        }
+        SegmentContent::Image(png_data) => {
+            let segment_id = store::insert_segment(
+                pool,
+                content_hash,
+                seg.index as i32,
+                &seg.label,
+                None,
+            )
+            .await?;
+
+            let embeddings = embedder
+                .embed_image_bytes(vec![png_data.clone()])
+                .await?;
+            let emb = embeddings.into_iter().next().ok_or_else(|| {
+                anyhow::anyhow!("empty image embedding result for {}", seg.label)
+            })?;
+
+            store::insert_chunk(
+                pool,
+                segment_id,
+                0,
+                content_hash,
+                seg.index as i32,
+                &seg.label,
+                None,
+                &emb,
+                embedder.provider_name(),
+                embedder.model_name(),
+                embedder.dimension() as i32,
+            )
+            .await?;
+            chunk_count += 1;
+        }
+    }
+
+    Ok(chunk_count)
 }
 
 async fn ingest_segments(
@@ -148,81 +311,10 @@ async fn ingest_segments(
     segments: &[crate::decompose::Segment],
     chunk_cfg: &ChunkConfig,
 ) -> anyhow::Result<u32> {
-    use crate::decompose::SegmentContent;
-
     let mut total_chunks = 0u32;
-
     for seg in segments {
-        match &seg.content {
-            SegmentContent::Text(text) => {
-                let segment_id = store::insert_segment(
-                    pool,
-                    content_hash,
-                    seg.index as i32,
-                    &seg.label,
-                    Some(text),
-                )
-                .await?;
-
-                let chunks = chunk::chunk_segment(text, &seg.label, chunk_cfg);
-                let chunk_texts: Vec<String> =
-                    chunks.iter().map(|c| c.content.clone()).collect();
-                let embeddings = embedder.embed_batch(chunk_texts).await?;
-
-                for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
-                    store::insert_chunk(
-                        pool,
-                        segment_id,
-                        ch.index as i32,
-                        content_hash,
-                        seg.index as i32,
-                        &ch.label,
-                        Some(&ch.content),
-                        emb,
-                        embedder.provider_name(),
-                        embedder.model_name(),
-                        embedder.dimension() as i32,
-                    )
-                    .await?;
-                    total_chunks += 1;
-                }
-            }
-            SegmentContent::Image(png_data) => {
-                let segment_id = store::insert_segment(
-                    pool,
-                    content_hash,
-                    seg.index as i32,
-                    &seg.label,
-                    None,
-                )
-                .await?;
-
-                let embeddings = embedder
-                    .embed_image_bytes(vec![png_data.clone()])
-                    .await?;
-                let emb = embeddings.into_iter().next().ok_or_else(|| {
-                    anyhow::anyhow!("empty image embedding result for {}", seg.label)
-                })?;
-
-                store::insert_chunk(
-                    pool,
-                    segment_id,
-                    0,
-                    content_hash,
-                    seg.index as i32,
-                    &seg.label,
-                    None,
-                    &emb,
-                    embedder.provider_name(),
-                    embedder.model_name(),
-                    embedder.dimension() as i32,
-                )
-                .await?;
-                total_chunks += 1;
-            }
-        }
+        total_chunks += ingest_one_segment(pool, embedder, content_hash, seg, chunk_cfg).await?;
     }
-
     Ok(total_chunks)
 }
 
