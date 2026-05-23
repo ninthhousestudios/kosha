@@ -8,7 +8,7 @@ set -euo pipefail
 # note: we changed to this image because the other one had a version mismatch for nvcc. didnt actually test this images though
 # since i didnt want to restart the pod; we just installed a different version of nvcc
 #   GPU:   L40S or L4 (Qwen3-VL-2B fits easily)
-#   tested on L4; used about 5gb of vram. an rtx card would work fine too
+#   tested on L4; used about 5-6gb of vram. an rtx card would work fine too
 #   corpus was about 1gb; i did a 40gb disk but 20gb would have been fine
 #   vCPU:  12+
 #   Disk:  40GB+ (postgres WAL can bloat under bulk inserts)
