@@ -67,6 +67,15 @@ pub async fn insert_leaf(
     Ok(())
 }
 
+pub async fn update_leaf_segment_count(pool: &PgPool, content_hash: &str, count: i32) -> Result<()> {
+    sqlx::query("UPDATE leaves SET segment_count = $2, updated_at = now() WHERE content_hash = $1")
+        .bind(content_hash)
+        .bind(count)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn mark_leaf_ready(pool: &PgPool, content_hash: &str) -> Result<()> {
     sqlx::query("UPDATE leaves SET status = 'ready', updated_at = now() WHERE content_hash = $1")
         .bind(content_hash)
