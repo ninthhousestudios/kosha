@@ -4,7 +4,7 @@ use anyhow::Context;
 use cairo::{Format, ImageSurface};
 use poppler::Document;
 
-use super::{Decomposer, Segment, SegmentContent};
+use super::{Segment, SegmentContent};
 
 const RENDER_DPI: f64 = 150.0;
 const PDF_POINTS_PER_INCH: f64 = 72.0;
@@ -26,7 +26,8 @@ impl PdfDecomposer {
             let batch_end = (batch_start + PARALLEL_PAGES).min(n_pages);
             let batch_size = batch_end - batch_start;
 
-            let (batch_tx, batch_rx) = mpsc::sync_channel::<(usize, Option<Segment>)>(batch_size);
+            let (batch_tx, batch_rx) =
+                mpsc::sync_channel::<(usize, Result<Option<Segment>, anyhow::Error>)>(batch_size);
 
             std::thread::scope(|s| {
                 for offset in 0..batch_size {
@@ -37,34 +38,43 @@ impl PdfDecomposer {
                         let doc = match Document::from_data(content, None) {
                             Ok(d) => d,
                             Err(e) => {
-                                tracing::warn!(page = page_idx + 1, error = %e, "failed to open PDF for page, skipping");
-                                let _ = btx.send((offset, None));
+                                let _ = btx.send((offset, Err(anyhow::anyhow!(
+                                    "failed to open PDF for page {}: {e}", page_idx + 1
+                                ))));
                                 return;
                             }
                         };
                         let page = match doc.page(page_idx as i32) {
                             Some(p) => p,
                             None => {
-                                tracing::warn!(page = page_idx + 1, "page not accessible, skipping");
-                                let _ = btx.send((offset, None));
+                                let _ = btx.send((offset, Err(anyhow::anyhow!(
+                                    "page {} not accessible", page_idx + 1
+                                ))));
                                 return;
                             }
                         };
 
-                        let _ = btx.send((offset, decompose_page(&page, page_idx)));
+                        let _ = btx.send((offset, Ok(decompose_page(&page, page_idx))));
                     });
                 }
                 drop(batch_tx);
             });
 
-            let mut results: Vec<Option<Segment>> = (0..batch_size).map(|_| None).collect();
-            for (offset, seg) in batch_rx {
-                results[offset] = seg;
+            let mut results: Vec<Result<Option<Segment>, anyhow::Error>> =
+                (0..batch_size).map(|_| Ok(None)).collect();
+            for (offset, result) in batch_rx {
+                results[offset] = result;
             }
 
-            for seg in results.into_iter().flatten() {
-                if tx.send(seg).is_err() {
-                    return Ok(n_pages as i32);
+            for result in results {
+                match result {
+                    Err(e) => return Err(e),
+                    Ok(Some(seg)) => {
+                        if tx.send(seg).is_err() {
+                            return Ok(n_pages as i32);
+                        }
+                    }
+                    Ok(None) => {}
                 }
             }
         }
@@ -97,18 +107,6 @@ fn decompose_page(page: &poppler::Page, page_idx: usize) -> Option<Segment> {
             label,
             content: SegmentContent::Text(text),
         })
-    }
-}
-
-impl Decomposer for PdfDecomposer {
-    fn format_name(&self) -> &'static str {
-        "pdf"
-    }
-
-    fn decompose(&self, content: &[u8], _source_path: &str) -> anyhow::Result<Vec<Segment>> {
-        let (tx, rx) = mpsc::sync_channel(PARALLEL_PAGES * 2);
-        self.decompose_streamed(content, tx)?;
-        Ok(rx.into_iter().collect())
     }
 }
 

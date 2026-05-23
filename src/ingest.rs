@@ -31,7 +31,6 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 
 fn decomposer_for(path: &Path) -> Box<dyn Decomposer> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("pdf") => Box::new(PdfDecomposer),
         Some("epub") => Box::new(EpubDecomposer),
         Some("png" | "jpg" | "jpeg") => Box::new(ImageDecomposer),
         Some("md" | "markdown") => Box::new(MarkdownDecomposer),
@@ -193,8 +192,14 @@ async fn ingest_pdf_pipelined(
         }
     }
 
-    // Wait for the decompose thread to finish
-    let decompose_result = decompose_handle.await?;
+    let decompose_result = match decompose_handle.await {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("PDF decompose task panicked: {e}");
+            let _ = store::mark_leaf_error(pool, content_hash, &msg).await;
+            return Err(anyhow::anyhow!(msg));
+        }
+    };
 
     if let Some(e) = ingest_error {
         let _ = store::mark_leaf_error(pool, content_hash, &e.to_string()).await;
