@@ -26,6 +26,13 @@ pub trait EmbedProvider: Send + Sync {
         })
     }
 
+    fn embed_query(
+        &self,
+        text: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
+        self.embed_one(text)
+    }
+
     fn embed_image_bytes(
         &self,
         images: Vec<Vec<u8>>,

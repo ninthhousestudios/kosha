@@ -46,6 +46,16 @@ impl EmbedProvider for LocalEmbedder {
         })
     }
 
+    fn embed_query(
+        &self,
+        text: String,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
+        let prefixed = format!(
+            "Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery:{text}"
+        );
+        self.embed_one(prefixed)
+    }
+
     fn embed_image_bytes(
         &self,
         images: Vec<Vec<u8>>,

@@ -46,7 +46,7 @@ pub async fn handle(
     let limit = args.limit.unwrap_or(5).clamp(1, 20);
 
     let query_embedding = embedder
-        .embed_one(args.query.clone())
+        .embed_query(args.query.clone())
         .await
         .map_err(|e| KoshaError::Embed(e.to_string()))?;
 
