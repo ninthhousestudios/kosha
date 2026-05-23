@@ -4,8 +4,12 @@ set -euo pipefail
 # RunPod setup script for kosha GPU ingest.
 #
 # Recommended pod:
-#   Image: runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+#   Image: runpod/pytorch:2.6.0-py3.11-cuda12.7.1-cudnn-devel-ubuntu22.04
+# note: we changed to this image because the other one had a version mismatch for nvcc. didnt actually test this images though
+# since i didnt want to restart the pod; we just installed a different version of nvcc
 #   GPU:   L40S or L4 (Qwen3-VL-2B fits easily)
+#   tested on L4; used about 5gb of vram. an rtx card would work fine too
+#   corpus was about 1gb; i did a 40gb disk but 20gb would have been fine
 #   vCPU:  12+
 #   Disk:  40GB+ (postgres WAL can bloat under bulk inserts)
 #   RAM:   32GB+
@@ -19,7 +23,7 @@ set -euo pipefail
 #   bash /workspace/kosha/scripts/runpod-setup.sh
 #
 # After setup, ingest your corpus:
-#   /workspace/kosha/target/release/kosha --device gpu ingest -r /workspace/corpus/
+#   /workspace/kosha/target/release/kosha --device gpu ingest -r /workspace/corpus/ [--collection "collection"]
 #
 # Then dump and transfer home:
 #   pg_dump -U postgres -Fc kosha > /workspace/kosha-dump.pg
@@ -29,6 +33,9 @@ KOSHA_DIR="${KOSHA_DIR:-/workspace/kosha}"
 
 echo "=== kosha RunPod setup ==="
 echo "kosha dir: $KOSHA_DIR"
+
+echo "Cloning kosha..."
+git clone https://github.com/ninthhousestudios/kosha
 
 # ── System deps ─────────────────────────────────────────────────────
 # poppler + cairo are needed for PDF decomposition (poppler-rs, cairo-rs)
@@ -85,12 +92,42 @@ su - postgres -c "psql -c 'SELECT pg_reload_conf();'"
 
 echo "Postgres ready: kosha database with pgvector"
 
+# ── Clone candle & gemm forks (native BF16 matmul) ─────────────────
+CANDLE_DIR="/workspace/candle"
+GEMM_DIR="/workspace/gemm"
+
+if [ ! -d "$CANDLE_DIR" ]; then
+    echo "Cloning candle fork (bf16-cpu-matmul branch)..."
+    git clone --branch bf16-cpu-matmul --single-branch \
+        https://github.com/ninthhousestudios/candle.git "$CANDLE_DIR"
+else
+    echo "candle already cloned at $CANDLE_DIR"
+fi
+
+if [ ! -d "$GEMM_DIR" ]; then
+    echo "Cloning gemm fork (bf16 branch)..."
+    git clone --branch bf16 --single-branch \
+        https://github.com/ninthhousestudios/gemm.git "$GEMM_DIR"
+else
+    echo "gemm already cloned at $GEMM_DIR"
+fi
+
+# ── Download embedding model ───────────────────────────────────────
+MODEL_REPO="${KOSHA_MODEL_REPO:-Qwen/Qwen3-VL-Embedding-2B}"
+echo "Pre-downloading model: $MODEL_REPO"
+hf download "$MODEL_REPO"
+
 # ── Build kosha ─────────────────────────────────────────────────────
 cd "$KOSHA_DIR"
 
 cat > .env <<'EOF'
 DATABASE_URL=postgresql://postgres:postgres@localhost/kosha
 EOF
+
+# Override kosha's git-based patches to use local clones for faster rebuilds.
+sed -i 's|candle-core = { git = .*, branch = "bf16-cpu-matmul" }|candle-core = { path = "/workspace/candle/candle-core" }|' Cargo.toml
+sed -i 's|candle-nn = { git = .*, branch = "bf16-cpu-matmul" }|candle-nn = { path = "/workspace/candle/candle-nn" }|' Cargo.toml
+sed -i 's|gemm = { git = .*, branch = "bf16" }|gemm = { path = "/workspace/gemm/gemm" }|' Cargo.toml
 
 echo "Building kosha with CUDA support (this takes ~5-10 min on first run)..."
 cargo build --release --features cuda
