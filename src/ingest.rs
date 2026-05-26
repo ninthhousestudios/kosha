@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Instant;
 
 use sqlx::PgPool;
 
@@ -101,6 +102,8 @@ pub async fn ingest_file(
         None => {}
     }
 
+    tracing::info!(%content_hash, %source_path, "starting decompose + embed");
+
     let is_pdf = path.extension().and_then(|e| e.to_str()) == Some("pdf");
 
     if is_pdf {
@@ -125,6 +128,7 @@ async fn ingest_generic(
     let format_name = decomposer.format_name();
     let segments = decomposer.decompose(content, source_path)?;
     let segment_count = segments.len() as i32;
+    tracing::info!(%content_hash, segments = segment_count, "decompose complete, starting embed");
 
     store::insert_leaf(pool, content_hash, source_path, format_name, None, collection, segment_count).await?;
     if !tags.is_empty() {
@@ -180,6 +184,8 @@ async fn ingest_pdf_pipelined(
     let mut total_chunks = 0u32;
     let mut segment_count = 0i32;
     let mut ingest_error: Option<anyhow::Error> = None;
+    let started = Instant::now();
+    let mut last_log = started;
 
     for seg in rx {
         segment_count += 1;
@@ -189,6 +195,17 @@ async fn ingest_pdf_pipelined(
                 ingest_error = Some(e);
                 break;
             }
+        }
+
+        let now = Instant::now();
+        if now.duration_since(last_log).as_secs() >= 30 {
+            let elapsed = now.duration_since(started).as_secs_f64();
+            let rate = segment_count as f64 / elapsed;
+            tracing::info!(
+                %content_hash,
+                "{segment_count} segments, {total_chunks} chunks, {rate:.1} seg/s (streaming)",
+            );
+            last_log = now;
         }
     }
 
@@ -316,9 +333,28 @@ async fn ingest_segments(
     segments: &[crate::decompose::Segment],
     chunk_cfg: &ChunkConfig,
 ) -> anyhow::Result<u32> {
+    let total = segments.len();
     let mut total_chunks = 0u32;
-    for seg in segments {
+    let started = Instant::now();
+    let mut last_log = started;
+
+    for (i, seg) in segments.iter().enumerate() {
         total_chunks += ingest_one_segment(pool, embedder, content_hash, seg, chunk_cfg).await?;
+
+        let now = Instant::now();
+        if now.duration_since(last_log).as_secs() >= 30 {
+            let done = i + 1;
+            let elapsed = now.duration_since(started).as_secs_f64();
+            let rate = done as f64 / elapsed;
+            let eta_secs = if rate > 0.0 { (total - done) as f64 / rate } else { 0.0 };
+            tracing::info!(
+                %content_hash,
+                "{done}/{total} segments, {total_chunks} chunks, \
+                 {rate:.1} seg/s, ETA {:.0}m",
+                eta_secs / 60.0,
+            );
+            last_log = now;
+        }
     }
     Ok(total_chunks)
 }
