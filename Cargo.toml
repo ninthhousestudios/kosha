@@ -45,3 +45,10 @@ cuda = ["fastembed/cuda"]
 candle-core = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
 candle-nn = { git = "https://github.com/ninthhousestudios/candle.git", branch = "bf16-cpu-matmul" }
 gemm = { git = "https://github.com/ninthhousestudios/gemm.git", branch = "bf16" }
+
+[lints.clippy]
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+indexing_slicing = "warn"
