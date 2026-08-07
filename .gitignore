@@ -1,6 +1,9 @@
 .agents/
 .codex
-.sutra/
+.sutra/*/
+.sutra/acks/
+!.sutra/rules.toml
+!.sutra/owners.toml
 target/
 test-data/
 docs/put-pod-dump-locally.md

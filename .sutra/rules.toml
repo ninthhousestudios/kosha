@@ -1,0 +1,158 @@
+# .sutra/rules.toml — Architectural constraints for kosha
+#
+# Severity levels:
+#   blocking      — guard denies edits that introduce these
+#   advisory      — warning in review, agent proceeds
+#   informational — tracked in review output, silent otherwise
+#
+# Derived from the import graph (2026-08-07 adoption). docs/architecture.md
+# describes module purposes and the graceful-tiering model but states no
+# explicit forbidden-dependency rules; these encode the isolation the graph
+# already exhibits so it stays true under future edits.
+
+# ═══════════════════════════════════════════════════════════════════
+# Engine isolation
+# ═══════════════════════════════════════════════════════════════════
+# decompose, embed, and chunk are pure, independent engines: document→segments,
+# text/image→vector, and text→chunks respectively. Today each imports nothing
+# outside itself. The likely erosion is reaching into store for convenience or
+# cross-coupling the engines. Lock that shut.
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/decompose/**"
+to = "src/store.rs"
+name = "decompose-no-store"
+severity = "blocking"
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/decompose/**"
+to = "src/embed/**"
+name = "decompose-no-embed"
+severity = "blocking"
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/embed/**"
+to = "src/store.rs"
+name = "embed-no-store"
+severity = "blocking"
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/embed/**"
+to = "src/decompose/**"
+name = "embed-no-decompose"
+severity = "blocking"
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/chunk.rs"
+to = "src/store.rs"
+name = "chunk-no-store"
+severity = "blocking"
+
+# ═══════════════════════════════════════════════════════════════════
+# Layer direction — data layer must not reach up
+# ═══════════════════════════════════════════════════════════════════
+# store is the persistence layer (Postgres/pgvector). It sits below the
+# orchestrator (ingest) and presentation (tools/mcp); it must not call up into
+# them. Today store imports only error.
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/store.rs"
+to = "src/tools/**"
+name = "store-no-tools"
+severity = "blocking"
+
+[[constraint]]
+kind = "forbidden_dep"
+from = "src/store.rs"
+to = "src/ingest.rs"
+name = "store-no-ingest"
+severity = "blocking"
+
+# ═══════════════════════════════════════════════════════════════════
+# Cycle prevention
+# ═══════════════════════════════════════════════════════════════════
+# Each MCP tool handler should stay independent. No cycle exists today
+# (tools/mod.rs only re-exports downward). NOT applied to decompose/ or embed/,
+# which carry the legitimate mod.rs <-> submodule re-export cycle Rust requires.
+
+[[constraint]]
+kind = "no_cycles"
+scope = "src/tools/"
+name = "tools-acyclic"
+severity = "blocking"
+
+# ═══════════════════════════════════════════════════════════════════
+# Pattern discipline — lint-baseline tamper resistance
+# ═══════════════════════════════════════════════════════════════════
+# The workspace [lints.clippy] baseline (unwrap_used, dbg_macro, todo,
+# unimplemented, indexing_slicing) is only as strong as the ban on silencing it.
+# Zero #[allow] exist today, so this is enforceable with no waivers.
+
+[[constraint]]
+kind = "forbidden_pattern"
+language = "rust"
+query = '''
+(attribute_item (attribute (identifier) @m (#eq? @m "allow"))) @match
+(inner_attribute_item (attribute (identifier) @m (#eq? @m "allow"))) @match
+'''
+name = "no-allow-attributes"
+severity = "blocking"
+scope = "src/"
+provenance = "workspace [lints.clippy] baseline"
+
+# ═══════════════════════════════════════════════════════════════════
+# Pattern discipline — coding_discipline (advisory, introduced-only)
+# ═══════════════════════════════════════════════════════════════════
+# Edit-time twins of the clippy warn lints and CLAUDE.md coding_discipline.
+# Advisory: existing matches are grandfathered by introduced-only guard
+# semantics; test code (inline #[cfg(test)]) is excluded automatically.
+
+# .unwrap() — mirrors clippy::unwrap_used. Recoverable failure -> ?; violated
+# invariant -> .expect("invariant: ..."). (One prod site today: store.rs:23.)
+[[constraint]]
+kind = "forbidden_pattern"
+language = "rust"
+query = '(call_expression function: (field_expression field: (field_identifier) @m (#eq? @m "unwrap"))) @match'
+name = "no-unwrap"
+severity = "advisory"
+scope = "src/"
+provenance = "CLAUDE.md coding_discipline / clippy unwrap_used"
+
+# todo!()/unimplemented!() — mirrors clippy::todo, clippy::unimplemented.
+[[constraint]]
+kind = "forbidden_pattern"
+language = "rust"
+query = '(macro_invocation macro: (identifier) @m (#match? @m "^(todo|unimplemented)$")) @match'
+name = "no-todo-unimplemented"
+severity = "advisory"
+scope = "src/"
+provenance = "workspace [lints.clippy] baseline"
+
+# unsafe blocks — zero today. Advisory keeps future unsafe funneled through the
+# waiver flow so each site carries an audited invariant, not a pasted comment.
+[[constraint]]
+kind = "forbidden_pattern"
+language = "rust"
+query = '(unsafe_block) @match'
+name = "unsafe-requires-waiver"
+severity = "advisory"
+scope = "src/"
+provenance = "CLAUDE.md coding_discipline"
+
+# .clone() — No Clone-Driven Development. Method-call form only; the explicit
+# Arc::clone(&x)/Rc::clone(&x) form is a different AST node and is NOT matched,
+# so refcount sharing via the qualified form is already exempt.
+[[constraint]]
+kind = "forbidden_pattern"
+language = "rust"
+query = '(call_expression function: (field_expression field: (field_identifier) @m (#eq? @m "clone"))) @match'
+name = "no-clone-driven-dev"
+severity = "advisory"
+scope = "src/"
+provenance = "CLAUDE.md coding_discipline"
