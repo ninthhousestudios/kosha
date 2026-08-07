@@ -41,7 +41,7 @@ impl KoshaError {
         }
     }
 
-    pub fn data(&self) -> ErrorData {
+    pub fn data(self) -> ErrorData {
         match self {
             Self::Db(e) => ErrorData {
                 tool: "server",
@@ -60,11 +60,11 @@ impl KoshaError {
             } => ErrorData {
                 tool,
                 constraint: format!("{kind} must exist"),
-                next_action: next_action.clone(),
+                next_action,
             },
             Self::Internal { tool, message } => ErrorData {
                 tool,
-                constraint: message.clone(),
+                constraint: message,
                 next_action: "Report this as a bug; include server logs.".to_string(),
             },
             Self::Embed(msg) => ErrorData {

@@ -35,7 +35,9 @@ impl Decomposer for PlainTextDecomposer {
                 continue;
             }
 
-            let prev_is_sticky = current_parts.last().map_or(false, |p| p.len() <= STICKY_THRESHOLD);
+            let prev_is_sticky = current_parts
+                .last()
+                .map_or(false, |p| p.len() <= STICKY_THRESHOLD);
             let over_budget = current_len + para_len > SEGMENT_TARGET_CHARS;
             let para_is_sticky = para_len <= STICKY_THRESHOLD;
 
@@ -47,9 +49,15 @@ impl Decomposer for PlainTextDecomposer {
                 // start the next segment instead of dangling at the end of this one.
                 let mut carry: Vec<&str> = Vec::new();
                 while current_parts.len() > 1
-                    && current_parts.last().map_or(false, |p| p.len() <= STICKY_THRESHOLD)
+                    && current_parts
+                        .last()
+                        .map_or(false, |p| p.len() <= STICKY_THRESHOLD)
                 {
-                    carry.push(current_parts.pop().unwrap());
+                    carry.push(
+                        current_parts
+                            .pop()
+                            .expect("invariant: loop guard ensures len > 1"),
+                    );
                 }
                 carry.reverse();
 
@@ -83,7 +91,8 @@ impl Decomposer for PlainTextDecomposer {
 fn make_label(parts: &[&str]) -> String {
     let first = parts[0];
     let trimmed = first.lines().next().unwrap_or(first);
-    let trimmed = trimmed.trim_start_matches(|c: char| c == '-' || c == ' ' || c == '=' || c == '#');
+    let trimmed =
+        trimmed.trim_start_matches(|c: char| c == '-' || c == ' ' || c == '=' || c == '#');
     let trimmed = trimmed.trim();
     if trimmed.is_empty() || trimmed.len() > 80 {
         return "section".to_string();
@@ -157,7 +166,11 @@ mod tests {
     fn no_content_lost() {
         let text = "First.\n\nSecond.\n\n--- heading\n\nThird paragraph here.\n\nFourth paragraph.";
         let segs = decompose(text);
-        let merged: String = segs.iter().map(|s| seg_text(s)).collect::<Vec<_>>().join("\n\n");
+        let merged: String = segs
+            .iter()
+            .map(|s| seg_text(s))
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let original_nonws: String = text.chars().filter(|c| !c.is_whitespace()).collect();
         let merged_nonws: String = merged.chars().filter(|c| !c.is_whitespace()).collect();
         assert_eq!(original_nonws, merged_nonws);
@@ -171,8 +184,16 @@ mod tests {
                 "content ".repeat(200).trim()
             )
         };
-        let text = format!("{}\n\n{}\n\n{}", section("alpha"), section("beta"), section("gamma"));
+        let text = format!(
+            "{}\n\n{}\n\n{}",
+            section("alpha"),
+            section("beta"),
+            section("gamma")
+        );
         let segs = decompose(&text);
-        assert!(segs.len() >= 2, "separate sections should form distinct segments");
+        assert!(
+            segs.len() >= 2,
+            "separate sections should form distinct segments"
+        );
     }
 }

@@ -137,7 +137,7 @@ fn try_ncx_toc(
     let ncx_href = manifest
         .iter()
         .find(|(_, v)| v.ends_with(".ncx"))
-        .map(|(_, v)| v.clone())?;
+        .map(|(_, v)| v.as_str())?;
     let ncx_path = resolve_href(opf_dir, &ncx_href);
     let ncx = read_zip_entry(archive, &ncx_path).ok()?;
     Some(parse_ncx_nav_points(&ncx))
@@ -155,7 +155,8 @@ fn try_nav_toc(
         if let Some(pos) = lower.find(&pattern) {
             lower[..pos + pattern.len() + 100.min(lower.len() - pos - pattern.len())]
                 .contains("properties=\"nav\"")
-                || lower[pos.saturating_sub(200)..pos + pattern.len()].contains("properties=\"nav\"")
+                || lower[pos.saturating_sub(200)..pos + pattern.len()]
+                    .contains("properties=\"nav\"")
         } else {
             false
         }
@@ -181,16 +182,12 @@ fn parse_ncx_nav_points(ncx: &str) -> HashMap<String, String> {
         let block = &ncx[abs..block_end];
         let block_lower = &lower[abs..block_end];
 
-        let label = block_lower
-            .find("<text>")
-            .and_then(|s| {
-                let start = s + 6;
-                block_lower[start..].find("</text>").map(|e| {
-                    strip_tags(&block[start..start + e])
-                        .trim()
-                        .to_string()
-                })
-            });
+        let label = block_lower.find("<text>").and_then(|s| {
+            let start = s + 6;
+            block_lower[start..]
+                .find("</text>")
+                .map(|e| strip_tags(&block[start..start + e]).trim().to_string())
+        });
 
         let src = block_lower
             .find("<content")
@@ -314,10 +311,7 @@ mod tests {
                 "<navPoint id=\"np{}\"><navLabel><text>{}</text></navLabel><content src=\"{}\"/></navPoint>\n",
                 i, label, href
             ));
-            let xhtml = format!(
-                "<html><body><p>{}</p></body></html>",
-                body
-            );
+            let xhtml = format!("<html><body><p>{}</p></body></html>", body);
             files.push((Box::leak(href.into_boxed_str()), xhtml));
         }
 
@@ -352,9 +346,7 @@ mod tests {
             nav_points
         );
 
-        let mut all_files: Vec<(&str, &str)> = vec![
-            ("META-INF/container.xml", container),
-        ];
+        let mut all_files: Vec<(&str, &str)> = vec![("META-INF/container.xml", container)];
 
         let opf_leaked: &str = Box::leak(opf.into_boxed_str());
         let ncx_leaked: &str = Box::leak(ncx.into_boxed_str());
@@ -375,9 +367,7 @@ mod tests {
             ("ch2", "Chapter One", "The story begins here."),
         ]);
 
-        let segs = EpubDecomposer
-            .decompose(&epub, "book.epub")
-            .unwrap();
+        let segs = EpubDecomposer.decompose(&epub, "book.epub").unwrap();
 
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].label, "Introduction");
@@ -388,13 +378,9 @@ mod tests {
 
     #[test]
     fn chapters_get_toc_labels() {
-        let epub = minimal_epub(&[
-            ("vibhuti", "ch. 3 — Vibhuti Pada", "Powers and attainments."),
-        ]);
+        let epub = minimal_epub(&[("vibhuti", "ch. 3 — Vibhuti Pada", "Powers and attainments.")]);
 
-        let segs = EpubDecomposer
-            .decompose(&epub, "yoga-sutras.epub")
-            .unwrap();
+        let segs = EpubDecomposer.decompose(&epub, "yoga-sutras.epub").unwrap();
 
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].label, "ch. 3 — Vibhuti Pada");
@@ -402,13 +388,13 @@ mod tests {
 
     #[test]
     fn html_tags_stripped_from_content() {
-        let epub = minimal_epub(&[
-            ("ch1", "Title", "Some <em>emphasized</em> and <strong>bold</strong> text."),
-        ]);
+        let epub = minimal_epub(&[(
+            "ch1",
+            "Title",
+            "Some <em>emphasized</em> and <strong>bold</strong> text.",
+        )]);
 
-        let segs = EpubDecomposer
-            .decompose(&epub, "book.epub")
-            .unwrap();
+        let segs = EpubDecomposer.decompose(&epub, "book.epub").unwrap();
 
         assert!(matches!(
             &segs[0].content,
@@ -423,9 +409,7 @@ mod tests {
             ("ch1", "Real Content", "Actual text here."),
         ]);
 
-        let segs = EpubDecomposer
-            .decompose(&epub, "book.epub")
-            .unwrap();
+        let segs = EpubDecomposer.decompose(&epub, "book.epub").unwrap();
 
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].label, "Real Content");
@@ -448,9 +432,7 @@ mod tests {
             ("ch1.xhtml", ch1),
         ]);
 
-        let segs = EpubDecomposer
-            .decompose(&epub, "book.epub")
-            .unwrap();
+        let segs = EpubDecomposer.decompose(&epub, "book.epub").unwrap();
 
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].label, "chapter 1");

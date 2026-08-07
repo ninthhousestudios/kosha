@@ -18,10 +18,11 @@ pub async fn resolve_hash_prefix(pool: &PgPool, prefix: &str) -> Result<Option<S
     .bind(prefix)
     .fetch_all(pool)
     .await?;
-    match rows.len() {
-        0 => Ok(None),
-        1 => Ok(Some(rows.into_iter().next().unwrap())),
-        _ => Err(crate::error::KoshaError::Internal {
+    let mut iter = rows.into_iter();
+    match (iter.next(), iter.next()) {
+        (None, _) => Ok(None),
+        (Some(hash), None) => Ok(Some(hash)),
+        (Some(_), Some(_)) => Err(crate::error::KoshaError::Internal {
             tool: "list",
             message: format!("ambiguous hash prefix '{prefix}' — matches multiple leaves"),
         }),
@@ -67,7 +68,11 @@ pub async fn insert_leaf(
     Ok(())
 }
 
-pub async fn update_leaf_segment_count(pool: &PgPool, content_hash: &str, count: i32) -> Result<()> {
+pub async fn update_leaf_segment_count(
+    pool: &PgPool,
+    content_hash: &str,
+    count: i32,
+) -> Result<()> {
     sqlx::query("UPDATE leaves SET segment_count = $2, updated_at = now() WHERE content_hash = $1")
         .bind(content_hash)
         .bind(count)
