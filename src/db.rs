@@ -26,7 +26,9 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
 /// different model is configured (e.g. a small ONNX text model), the column and its
 /// HNSW index are recreated at the model's dimension. This only rewrites an *unused*
 /// embedding column: if chunks already hold embeddings at another dimension it bails
-/// rather than silently destroy them. A no-op when the dimension already matches.
+/// rather than silently destroy them. The retype + index rebuild run in one transaction
+/// so an interrupted reconcile rolls back cleanly. When the dimension already matches this
+/// is a near no-op that only ensures the HNSW index is present.
 pub async fn ensure_embedding_dim(pool: &PgPool, dim: usize) -> Result<()> {
     // halfvec HNSW supports up to 4000 dims; bound the value we interpolate below.
     if !(1..=4000).contains(&dim) {
@@ -54,15 +56,31 @@ pub async fn ensure_embedding_dim(pool: &PgPool, dim: usize) -> Result<()> {
         .split_once('(')
         .and_then(|(_, rest)| rest.strip_suffix(')'))
         .and_then(|n| n.parse().ok());
+    // Already at the target dimension: nothing to retype, but still ensure the HNSW
+    // index exists. A prior reconcile interrupted after the column retype but before
+    // the index was rebuilt (or a manually dropped index) would otherwise never
+    // self-heal — this early return would see a matching dim and skip the rebuild.
     if current_dim == Some(dim) {
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks \
+             USING hnsw (embedding halfvec_cosine_ops) WITH (m = 16, ef_construction = 64)",
+        )
+        .execute(pool)
+        .await?;
         return Ok(());
     }
 
+    // Retype the column and rebuild the index in one transaction so a crash mid-reconcile
+    // rolls back to the original schema rather than leaving the column retyped with no
+    // index (an inconsistent state the matching-dim early return above would never repair).
+    let mut tx = pool.begin().await?;
+
     let existing: i64 =
         sqlx::query_scalar("SELECT count(*) FROM chunks WHERE embedding IS NOT NULL")
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)
             .await?;
     if existing > 0 {
+        // Dropping `tx` here rolls back; no DDL has run yet, so this is a no-op rollback.
         return Err(KoshaError::Internal {
             tool: "server",
             message: format!(
@@ -76,24 +94,26 @@ pub async fn ensure_embedding_dim(pool: &PgPool, dim: usize) -> Result<()> {
     tracing::info!(from = %current, to = dim, "recreating embedding column at new dimension");
     // `dim` is validated to 1..=4000 above, so interpolation is safe.
     sqlx::query("DROP INDEX IF EXISTS chunks_embedding_idx")
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     sqlx::query(&format!(
         "ALTER TABLE chunks ALTER COLUMN embedding TYPE halfvec({dim})"
     ))
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     sqlx::query(&format!(
         "ALTER TABLE chunks ALTER COLUMN embed_dimension SET DEFAULT {dim}"
     ))
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     sqlx::query(
         "CREATE INDEX chunks_embedding_idx ON chunks USING hnsw (embedding halfvec_cosine_ops) \
          WITH (m = 16, ef_construction = 64)",
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(())
 }
