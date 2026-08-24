@@ -31,14 +31,22 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 fastembed = { git = "https://github.com/ninthhousestudios/fastembed-rs.git", branch = "fix/qwen3-f16-dtype-mismatches", default-features = false, features = ["qwen3", "hf-hub-native-tls"] }
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["alternative-backend"] }
+ort = { version = "=2.0.0-rc.12", default-features = false }
 candle-core = "0.10.2"
 poppler-rs = "0.26"
 zip = { version = "7", default-features = false, features = ["deflate"] }
 cairo-rs = { version = "0.22", features = ["png"] }
 
 [features]
-default = []
+default = ["candle-backend"]
+# Default build: multimodal Qwen3-VL embeddings via candle. fastembed links `ort`
+# unconditionally, so `alternative-backend` (disable-linking) keeps the ONNX Runtime
+# out of the build — the candle path never touches ort.
+candle-backend = ["ort/alternative-backend"]
+# Text-only ONNX embedding provider (fastembed `TextEmbedding`). Downloads and links
+# a prebuilt ONNX Runtime, so it is mutually exclusive with `candle-backend`; build with:
+#   cargo build --no-default-features --features onnx
+onnx = ["ort/download-binaries", "fastembed/ort-download-binaries-native-tls"]
 cuda = ["fastembed/cuda"]
 
 [patch.crates-io]

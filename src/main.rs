@@ -97,15 +97,25 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Serve => run_serve(cfg, &device).await,
-        Commands::List { leaf, collection, format, tags } => {
-            run_list(cfg, leaf, collection, format, &tags).await
-        }
-        Commands::Ingest { paths, recursive, collection, tags } => {
-            run_ingest(cfg, &paths, recursive, &collection, &tags, &device).await
-        }
-        Commands::Search { query, collections, tags, limit, json } => {
-            run_search(cfg, query, collections, tags, limit, json, &device).await
-        }
+        Commands::List {
+            leaf,
+            collection,
+            format,
+            tags,
+        } => run_list(cfg, leaf, collection, format, &tags).await,
+        Commands::Ingest {
+            paths,
+            recursive,
+            collection,
+            tags,
+        } => run_ingest(cfg, &paths, recursive, &collection, &tags, &device).await,
+        Commands::Search {
+            query,
+            collections,
+            tags,
+            limit,
+            json,
+        } => run_search(cfg, query, collections, tags, limit, json, &device).await,
     }
 }
 
@@ -118,6 +128,9 @@ async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
         .context("running migrations")?;
 
     let embedder = build_embedder(&cfg, device).await?;
+    db::ensure_embedding_dim(&pool, embedder.dimension())
+        .await
+        .context("reconciling embedding dimension")?;
 
     let server = KoshaServer::new(pool, embedder);
     let service = server.serve(stdio()).await.context("starting MCP server")?;
@@ -224,6 +237,9 @@ async fn run_ingest(
         .context("running migrations")?;
 
     let embedder = build_embedder(&cfg, device).await?;
+    db::ensure_embedding_dim(&pool, embedder.dimension())
+        .await
+        .context("reconciling embedding dimension")?;
 
     let chunk_cfg = ChunkConfig {
         target_tokens: cfg.chunk_target_tokens,
@@ -241,8 +257,8 @@ async fn run_ingest(
                     p
                 );
             }
-            let dir_files = kosha::ingest::collect_files(path)
-                .with_context(|| format!("walking {p}"))?;
+            let dir_files =
+                kosha::ingest::collect_files(path).with_context(|| format!("walking {p}"))?;
             files.extend(dir_files);
         } else {
             files.push(path.to_path_buf());
@@ -273,10 +289,7 @@ async fn run_ingest(
                 skipped += 1;
             }
             Ok(result) => {
-                eprintln!(
-                    "  {} segments, {} chunks",
-                    result.segments, result.chunks
-                );
+                eprintln!("  {} segments, {} chunks", result.segments, result.chunks);
                 ingested += 1;
             }
             Err(e) => {
@@ -307,18 +320,28 @@ async fn run_search(
     device: &Device,
 ) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
-    db::run_migrations(&pool).await.context("running migrations")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
 
     let embedder = build_embedder(&cfg, device).await?;
+    db::ensure_embedding_dim(&pool, embedder.dimension())
+        .await
+        .context("reconciling embedding dimension")?;
 
     let args = SearchArgs {
         query,
-        collections: if collections.is_empty() { None } else { Some(collections) },
+        collections: if collections.is_empty() {
+            None
+        } else {
+            Some(collections)
+        },
         tags: if tags.is_empty() { None } else { Some(tags) },
         limit: Some(limit),
     };
 
-    let output = kosha::tools::search::handle(&pool, embedder.as_ref(), args).await
+    let output = kosha::tools::search::handle(&pool, embedder.as_ref(), args)
+        .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if json {
@@ -333,8 +356,16 @@ async fn run_search(
 
     println!("{} result(s) for: {}\n", output.count, output.query);
     for (i, hit) in output.results.iter().enumerate() {
-        println!("{}. [score: {:.4}] {}", i + 1, hit.score, hit.citation.source_path);
-        println!("   {} (chunk {})", hit.citation.chunk_label, hit.citation.chunk_index);
+        println!(
+            "{}. [score: {:.4}] {}",
+            i + 1,
+            hit.score,
+            hit.citation.source_path
+        );
+        println!(
+            "   {} (chunk {})",
+            hit.citation.chunk_label, hit.citation.chunk_index
+        );
         let preview: String = hit.content.chars().take(200).collect();
         let ellipsis = if hit.content.len() > 200 { "..." } else { "" };
         println!("   {}{}\n", preview, ellipsis);
@@ -414,7 +445,32 @@ async fn build_embedder(cfg: &Config, device: &Device) -> Result<Arc<dyn EmbedPr
             );
             Ok(Arc::new(embedder))
         }
-        other => anyhow::bail!("unknown KOSHA_EMBED_PROVIDER: {other} (expected \"local\" or \"http\")"),
+        "onnx" => {
+            #[cfg(feature = "onnx")]
+            {
+                let model = cfg
+                    .embed_model
+                    .as_ref()
+                    .context("KOSHA_EMBED_MODEL required when KOSHA_EMBED_PROVIDER=onnx")?
+                    .clone();
+                let batch = cfg.embed_batch_size;
+                tracing::info!(%model, "loading ONNX embedding model");
+                let embedder = tokio::task::spawn_blocking(move || {
+                    kosha::embed::OnnxEmbedder::load(&model, batch)
+                })
+                .await
+                .context("join error")?
+                .context("loading ONNX embedder")?;
+                Ok(Arc::new(embedder))
+            }
+            #[cfg(not(feature = "onnx"))]
+            {
+                anyhow::bail!("KOSHA_EMBED_PROVIDER=onnx requires kosha built with --features onnx")
+            }
+        }
+        other => anyhow::bail!(
+            "unknown KOSHA_EMBED_PROVIDER: {other} (expected \"local\", \"http\", or \"onnx\")"
+        ),
     }
 }
 

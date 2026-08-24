@@ -1,9 +1,13 @@
 mod http;
 mod local;
+#[cfg(feature = "onnx")]
+mod onnx;
 
 pub use candle_core::Device;
 pub use http::HttpEmbedder;
 pub use local::LocalEmbedder;
+#[cfg(feature = "onnx")]
+pub use onnx::OnnxEmbedder;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -38,7 +42,11 @@ pub trait EmbedProvider: Send + Sync {
         images: Vec<Vec<u8>>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
         let _ = images;
-        Box::pin(async { Err(anyhow::anyhow!("image embedding not supported by this provider")) })
+        Box::pin(async {
+            Err(anyhow::anyhow!(
+                "image embedding not supported by this provider"
+            ))
+        })
     }
 
     fn model_name(&self) -> &str;
