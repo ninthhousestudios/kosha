@@ -94,9 +94,7 @@ impl EmbedProvider for HttpEmbedder {
                 let status = resp.status();
                 if !status.is_success() {
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!(
-                        "embedding API returned {status}: {body}"
-                    ));
+                    return Err(anyhow::anyhow!("embedding API returned {status}: {body}"));
                 }
 
                 let body: EmbedResponse = resp

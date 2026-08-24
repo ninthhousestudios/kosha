@@ -1,0 +1,20 @@
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/decompose/pdf.rs"
+symbol = "PdfDecomposer::decompose_streamed"
+rationale = "mpsc::SyncSender handle clone for multi-producer fan-out (one sender per spawned page thread), not a deep copy — the idiomatic channel pattern, same category as Arc::clone."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/main.rs"
+symbol = "build_embedder"
+rationale = "Startup path (called once). Clones are forced by the &Config borrow: values must be owned/'static to move into the spawn_blocking closure (repo, device) or the HttpEmbedder constructor (url, model, api_key). device.clone() is a cheap candle Device handle."
+by = "josh"
+
+[[waiver]]
+constraint = "no-clone-driven-dev"
+file = "src/tools/read.rs"
+symbol = "handle"
+rationale = "content_text is returned in both ReadOutput.content and chunks[0].content — a genuine used-twice value. Removing the clone requires dropping the field duplication in ReadOutput (an API-shape decision), not a borrow-checker workaround."
+by = "josh"

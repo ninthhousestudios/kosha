@@ -43,8 +43,8 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300);
 
-        let embed_provider = std::env::var("KOSHA_EMBED_PROVIDER")
-            .unwrap_or_else(|_| "local".to_string());
+        let embed_provider =
+            std::env::var("KOSHA_EMBED_PROVIDER").unwrap_or_else(|_| "local".to_string());
 
         let model_repo = std::env::var("KOSHA_MODEL_REPO")
             .unwrap_or_else(|_| "Qwen/Qwen3-VL-Embedding-2B".to_string());
@@ -79,7 +79,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
-        assert!(chunk_target_tokens > 0, "KOSHA_CHUNK_TARGET_TOKENS must be > 0");
+        assert!(
+            chunk_target_tokens > 0,
+            "KOSHA_CHUNK_TARGET_TOKENS must be > 0"
+        );
         assert!(
             chunk_tolerance_tokens < chunk_target_tokens,
             "KOSHA_CHUNK_TOLERANCE_TOKENS ({chunk_tolerance_tokens}) must be < KOSHA_CHUNK_TARGET_TOKENS ({chunk_target_tokens})"
