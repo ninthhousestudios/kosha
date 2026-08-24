@@ -76,6 +76,8 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// List embedding models supported by the ONNX provider.
+    Models,
 }
 
 #[tokio::main]
@@ -84,6 +86,12 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
 
     let cli = Cli::parse();
+
+    // `models` lists static model metadata; it needs neither the DB nor config.
+    if matches!(cli.command, Commands::Models) {
+        return run_models();
+    }
+
     let cfg = Config::from_env();
 
     tracing_subscriber::fmt()
@@ -116,7 +124,28 @@ async fn main() -> Result<()> {
             limit,
             json,
         } => run_search(cfg, query, collections, tags, limit, json, &device).await,
+        Commands::Models => run_models(),
     }
+}
+
+/// Print the embedding models supported by the ONNX provider, with their
+/// output dimensions. The printed name is the value to pass as KOSHA_EMBED_MODEL.
+fn run_models() -> Result<()> {
+    let mut models = fastembed::TextEmbedding::list_supported_models();
+    models.sort_by(|a, b| a.model.to_string().cmp(&b.model.to_string()));
+    println!(
+        "{:<28} {:>5}  {}",
+        "MODEL (KOSHA_EMBED_MODEL)", "DIM", "DESCRIPTION"
+    );
+    for m in &models {
+        println!(
+            "{:<28} {:>5}  {}",
+            m.model.to_string(),
+            m.dim,
+            m.description
+        );
+    }
+    Ok(())
 }
 
 async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
