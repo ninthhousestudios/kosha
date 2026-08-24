@@ -89,14 +89,16 @@ impl OnnxEmbedder {
 
 /// Retrieval prefixes `(query, document)` for models that require them.
 ///
-/// Asymmetric-prefix models (nomic, e5) and query-instruction models (bge-en/zh)
-/// need these for correct retrieval; everything else (MiniLM, mpnet, gte, mxbai,
-/// bge-m3, …) embeds raw text.
+/// Asymmetric-prefix models (nomic, e5) and query-instruction models (bge-en/zh,
+/// mxbai) need these for correct retrieval; everything else (MiniLM, mpnet, gte,
+/// bge-m3, …) embeds raw text. mxbai-embed-large-v1 shares bge-en's query prompt
+/// (a document prefix would hurt it), so it groups with the bge-en/zh arm.
 fn prefixes_for(model: &EmbeddingModel) -> (&'static str, &'static str) {
     use EmbeddingModel::{
         BGEBaseENV15, BGEBaseENV15Q, BGELargeENV15, BGELargeENV15Q, BGELargeZHV15, BGESmallENV15,
         BGESmallENV15Q, BGESmallZHV15, MultilingualE5Base, MultilingualE5Large,
-        MultilingualE5Small, NomicEmbedTextV1, NomicEmbedTextV15, NomicEmbedTextV15Q,
+        MultilingualE5Small, MxbaiEmbedLargeV1, MxbaiEmbedLargeV1Q, NomicEmbedTextV1,
+        NomicEmbedTextV15, NomicEmbedTextV15Q,
     };
     match model {
         NomicEmbedTextV1 | NomicEmbedTextV15 | NomicEmbedTextV15Q => {
@@ -104,7 +106,8 @@ fn prefixes_for(model: &EmbeddingModel) -> (&'static str, &'static str) {
         }
         MultilingualE5Small | MultilingualE5Base | MultilingualE5Large => ("query: ", "passage: "),
         BGESmallENV15 | BGESmallENV15Q | BGEBaseENV15 | BGEBaseENV15Q | BGELargeENV15
-        | BGELargeENV15Q | BGESmallZHV15 | BGELargeZHV15 => (
+        | BGELargeENV15Q | BGESmallZHV15 | BGELargeZHV15 | MxbaiEmbedLargeV1
+        | MxbaiEmbedLargeV1Q => (
             "Represent this sentence for searching relevant passages: ",
             "",
         ),
