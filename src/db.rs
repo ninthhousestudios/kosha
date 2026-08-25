@@ -1,3 +1,4 @@
+use sqlx::AssertSqlSafe;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -96,14 +97,14 @@ pub async fn ensure_embedding_dim(pool: &PgPool, dim: usize) -> Result<()> {
     sqlx::query("DROP INDEX IF EXISTS chunks_embedding_idx")
         .execute(&mut *tx)
         .await?;
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "ALTER TABLE chunks ALTER COLUMN embedding TYPE halfvec({dim})"
-    ))
+    )))
     .execute(&mut *tx)
     .await?;
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "ALTER TABLE chunks ALTER COLUMN embed_dimension SET DEFAULT {dim}"
-    ))
+    )))
     .execute(&mut *tx)
     .await?;
     sqlx::query(
