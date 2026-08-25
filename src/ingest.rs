@@ -58,7 +58,10 @@ fn collect_files_rec(dir: &Path, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            if path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')) {
+            if path
+                .file_name()
+                .is_some_and(|n| !n.to_string_lossy().starts_with('.'))
+            {
                 collect_files_rec(&path, out)?;
             }
         } else if has_supported_extension(&path) {
@@ -107,9 +110,30 @@ pub async fn ingest_file(
     let is_pdf = path.extension().and_then(|e| e.to_str()) == Some("pdf");
 
     if is_pdf {
-        ingest_pdf_pipelined(pool, embedder, &content, &content_hash, &source_path, chunk_cfg, collection, tags).await
+        ingest_pdf_pipelined(
+            pool,
+            embedder,
+            &content,
+            &content_hash,
+            &source_path,
+            chunk_cfg,
+            collection,
+            tags,
+        )
+        .await
     } else {
-        ingest_generic(pool, embedder, path, &content, &content_hash, &source_path, chunk_cfg, collection, tags).await
+        ingest_generic(
+            pool,
+            embedder,
+            path,
+            &content,
+            &content_hash,
+            &source_path,
+            chunk_cfg,
+            collection,
+            tags,
+        )
+        .await
     }
 }
 
@@ -130,7 +154,16 @@ async fn ingest_generic(
     let segment_count = segments.len() as i32;
     tracing::info!(%content_hash, segments = segment_count, "decompose complete, starting embed");
 
-    store::insert_leaf(pool, content_hash, source_path, format_name, None, collection, segment_count).await?;
+    store::insert_leaf(
+        pool,
+        content_hash,
+        source_path,
+        format_name,
+        None,
+        collection,
+        segment_count,
+    )
+    .await?;
     if !tags.is_empty() {
         store::set_leaf_tags(pool, content_hash, tags).await?;
     }
@@ -256,18 +289,12 @@ async fn ingest_one_segment(
 
     match &seg.content {
         SegmentContent::Text(text) => {
-            let segment_id = store::insert_segment(
-                pool,
-                content_hash,
-                seg.index as i32,
-                &seg.label,
-                Some(text),
-            )
-            .await?;
+            let segment_id =
+                store::insert_segment(pool, content_hash, seg.index as i32, &seg.label, Some(text))
+                    .await?;
 
             let chunks = chunk::chunk_segment(text, &seg.label, chunk_cfg);
-            let chunk_texts: Vec<String> =
-                chunks.iter().map(|c| c.content.clone()).collect();
+            let chunk_texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
             let embeddings = embedder.embed_batch(chunk_texts).await?;
 
             for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
@@ -289,21 +316,15 @@ async fn ingest_one_segment(
             }
         }
         SegmentContent::Image(png_data) => {
-            let segment_id = store::insert_segment(
-                pool,
-                content_hash,
-                seg.index as i32,
-                &seg.label,
-                None,
-            )
-            .await?;
+            let segment_id =
+                store::insert_segment(pool, content_hash, seg.index as i32, &seg.label, None)
+                    .await?;
 
-            let embeddings = embedder
-                .embed_image_bytes(vec![png_data.clone()])
-                .await?;
-            let emb = embeddings.into_iter().next().ok_or_else(|| {
-                anyhow::anyhow!("empty image embedding result for {}", seg.label)
-            })?;
+            let embeddings = embedder.embed_image_bytes(vec![png_data.clone()]).await?;
+            let emb = embeddings
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("empty image embedding result for {}", seg.label))?;
 
             store::insert_chunk(
                 pool,
@@ -346,7 +367,11 @@ async fn ingest_segments(
             let done = i + 1;
             let elapsed = now.duration_since(started).as_secs_f64();
             let rate = done as f64 / elapsed;
-            let eta_secs = if rate > 0.0 { (total - done) as f64 / rate } else { 0.0 };
+            let eta_secs = if rate > 0.0 {
+                (total - done) as f64 / rate
+            } else {
+                0.0
+            };
             tracing::info!(
                 %content_hash,
                 "{done}/{total} segments, {total_chunks} chunks, \
@@ -398,8 +423,14 @@ mod tests {
         assert!(names.contains(&"a.md"));
         assert!(names.contains(&"b.txt"));
         assert!(names.contains(&"c.pdf"));
-        assert!(!names.contains(&"skip.rs"), "unsupported extension should be skipped");
-        assert!(!names.contains(&"d.md"), "hidden directories should be skipped");
+        assert!(
+            !names.contains(&"skip.rs"),
+            "unsupported extension should be skipped"
+        );
+        assert!(
+            !names.contains(&"d.md"),
+            "hidden directories should be skipped"
+        );
         assert_eq!(files.len(), 3);
     }
 

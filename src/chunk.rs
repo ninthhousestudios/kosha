@@ -256,8 +256,8 @@ mod tests {
         // min=20, target=40, ceiling=60  (in chars)
         let text = format!(
             "{}\n\n{}",
-            "word ".repeat(9).trim(),  // 44 chars
-            "more ".repeat(9).trim()   // 44 chars
+            "word ".repeat(9).trim(), // 44 chars
+            "more ".repeat(9).trim()  // 44 chars
         );
         let chunks = chunk_segment(&text, "seg", &cfg(10, 5));
         assert!(
@@ -278,7 +278,10 @@ mod tests {
         let chunks = chunk_segment(&text, "seg", &cfg(10, 5));
         assert!(chunks.len() >= 2, "expected heading to trigger split");
         let heading_chunk = chunks.iter().find(|c| c.content.contains("# New Section"));
-        assert!(heading_chunk.is_some(), "heading should appear in some chunk");
+        assert!(
+            heading_chunk.is_some(),
+            "heading should appear in some chunk"
+        );
         assert!(
             heading_chunk.unwrap().content.starts_with("# New Section"),
             "heading should start its chunk, got: {:?}",
@@ -357,7 +360,12 @@ mod tests {
     #[test]
     fn labels_with_total_count() {
         // ceiling=28 chars — forces many small chunks
-        let text = format!("{}\n\n{}\n\n{}", "aaa ".repeat(8), "bbb ".repeat(8), "ccc ".repeat(8));
+        let text = format!(
+            "{}\n\n{}\n\n{}",
+            "aaa ".repeat(8),
+            "bbb ".repeat(8),
+            "ccc ".repeat(8)
+        );
         let chunks = chunk_segment(&text, "page 1", &cfg(5, 2));
         if chunks.len() > 1 {
             for (i, ch) in chunks.iter().enumerate() {

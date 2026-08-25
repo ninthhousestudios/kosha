@@ -26,16 +26,17 @@ pub struct SegmentEntry {
 #[tracing::instrument(name = "tool.kosha_outline", skip(pool))]
 pub async fn handle(pool: &PgPool, args: OutlineArgs) -> Result<OutlineOutput> {
     // Verify the leaf exists first
-    let _leaf = store::get_leaf(pool, &args.leaf_id)
-        .await?
-        .ok_or_else(|| KoshaError::NotFound {
-            tool: "kosha_outline",
-            kind: "leaf",
-            next_action: format!(
-                "No leaf with id '{}'. Use kosha_leaves to list available leaves.",
-                args.leaf_id
-            ),
-        })?;
+    let _leaf =
+        store::get_leaf(pool, &args.leaf_id)
+            .await?
+            .ok_or_else(|| KoshaError::NotFound {
+                tool: "kosha_outline",
+                kind: "leaf",
+                next_action: format!(
+                    "No leaf with id '{}'. Use kosha_leaves to list available leaves.",
+                    args.leaf_id
+                ),
+            })?;
 
     let entries = store::leaf_outline(pool, &args.leaf_id).await?;
 

@@ -18,8 +18,7 @@ impl PdfDecomposer {
         content: &[u8],
         tx: mpsc::SyncSender<Segment>,
     ) -> anyhow::Result<i32> {
-        let doc = Document::from_data(content, None)
-            .context("failed to parse PDF")?;
+        let doc = Document::from_data(content, None).context("failed to parse PDF")?;
         let n_pages = doc.n_pages() as usize;
 
         for batch_start in (0..n_pages).step_by(PARALLEL_PAGES) {
@@ -38,18 +37,23 @@ impl PdfDecomposer {
                         let doc = match Document::from_data(content, None) {
                             Ok(d) => d,
                             Err(e) => {
-                                let _ = btx.send((offset, Err(anyhow::anyhow!(
-                                    "failed to open PDF for page {}: {e}", page_idx + 1
-                                ))));
+                                let _ = btx.send((
+                                    offset,
+                                    Err(anyhow::anyhow!(
+                                        "failed to open PDF for page {}: {e}",
+                                        page_idx + 1
+                                    )),
+                                ));
                                 return;
                             }
                         };
                         let page = match doc.page(page_idx as i32) {
                             Some(p) => p,
                             None => {
-                                let _ = btx.send((offset, Err(anyhow::anyhow!(
-                                    "page {} not accessible", page_idx + 1
-                                ))));
+                                let _ = btx.send((
+                                    offset,
+                                    Err(anyhow::anyhow!("page {} not accessible", page_idx + 1)),
+                                ));
                                 return;
                             }
                         };
@@ -89,7 +93,10 @@ fn decompose_page(page: &poppler::Page, page_idx: usize) -> Option<Segment> {
     let label = format!("p. {}", page_idx + 1);
 
     if text.is_empty() {
-        tracing::debug!(page = page_idx + 1, "page has no text layer, rendering to PNG");
+        tracing::debug!(
+            page = page_idx + 1,
+            "page has no text layer, rendering to PNG"
+        );
         match render_page_to_png(page) {
             Ok(png_bytes) => Some(Segment {
                 index: page_idx,
@@ -119,8 +126,7 @@ fn render_page_to_png(page: &poppler::Page) -> anyhow::Result<Vec<u8>> {
     let surface = ImageSurface::create(Format::Rgb24, w_px, h_px)
         .map_err(|e| anyhow::anyhow!("cairo surface: {e}"))?;
 
-    let cr = cairo::Context::new(&surface)
-        .map_err(|e| anyhow::anyhow!("cairo context: {e}"))?;
+    let cr = cairo::Context::new(&surface).map_err(|e| anyhow::anyhow!("cairo context: {e}"))?;
 
     // White background
     cr.set_source_rgb(1.0, 1.0, 1.0);
@@ -132,7 +138,8 @@ fn render_page_to_png(page: &poppler::Page) -> anyhow::Result<Vec<u8>> {
     drop(cr);
 
     let mut buf = Vec::new();
-    surface.write_to_png(&mut buf)
+    surface
+        .write_to_png(&mut buf)
         .map_err(|e| anyhow::anyhow!("PNG write: {e}"))?;
 
     Ok(buf)
