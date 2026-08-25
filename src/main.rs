@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -28,8 +29,12 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Run as a stdio MCP server (default).
-    Serve,
+    /// Run as a server: stdio MCP (default), or a thin HTTP search surface with --http.
+    Serve {
+        /// Serve the thin HTTP surface (POST /search, GET|POST /health) instead of stdio MCP.
+        #[arg(long)]
+        http: bool,
+    },
     /// List ingested documents, or show outline for a specific leaf.
     List {
         /// Content hash (prefix ok) to show outline for. Omit to list all leaves.
@@ -104,7 +109,13 @@ async fn main() -> Result<()> {
     let device = resolve_device(&cli.device)?;
 
     match cli.command {
-        Commands::Serve => run_serve(cfg, &device).await,
+        Commands::Serve { http } => {
+            if http {
+                run_serve_http(cfg, &device).await
+            } else {
+                run_serve(cfg, &device).await
+            }
+        }
         Commands::List {
             leaf,
             collection,
@@ -167,6 +178,44 @@ async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
     tokio::select! {
         res = service.waiting() => {
             res.context("MCP server exited")?;
+        }
+        _ = shutdown_signal() => {
+            tracing::info!("shutdown signal received");
+        }
+    }
+
+    Ok(())
+}
+
+/// Serve the thin HTTP surface (`POST /search`, `GET|POST /health`) instead of
+/// stdio MCP. Same pool/embedder setup as `run_serve`; the backend calls this
+/// from behind its own op surface. Listen address comes from `KOSHA_HTTP_ADDR`/
+/// `KOSHA_HTTP_PORT` (default `0.0.0.0:3400`).
+async fn run_serve_http(cfg: Config, device: &Device) -> Result<()> {
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "kosha HTTP starting");
+
+    let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
+    db::run_migrations(&pool)
+        .await
+        .context("running migrations")?;
+
+    let embedder = build_embedder(&cfg, device).await?;
+    db::ensure_embedding_dim(&pool, embedder.dimension())
+        .await
+        .context("reconciling embedding dimension")?;
+
+    let addr: SocketAddr = format!("{}:{}", cfg.http_addr, cfg.http_port)
+        .parse()
+        .with_context(|| {
+            format!(
+                "invalid HTTP listen address {}:{}",
+                cfg.http_addr, cfg.http_port
+            )
+        })?;
+
+    tokio::select! {
+        res = kosha::serve_http::serve(pool, embedder, addr) => {
+            res.context("HTTP server exited")?;
         }
         _ = shutdown_signal() => {
             tracing::info!("shutdown signal received");

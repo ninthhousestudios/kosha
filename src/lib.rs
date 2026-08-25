@@ -6,5 +6,6 @@ pub mod embed;
 pub mod error;
 pub mod ingest;
 pub mod mcp;
+pub mod serve_http;
 pub mod store;
 pub mod tools;

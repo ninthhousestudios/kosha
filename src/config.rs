@@ -19,6 +19,9 @@ pub struct Config {
     pub chunk_target_tokens: usize,
     pub chunk_tolerance_tokens: usize,
     pub chunk_overlap_tokens: usize,
+    // HTTP surface (`kosha serve --http`)
+    pub http_addr: String,
+    pub http_port: u16,
 }
 
 impl Config {
@@ -79,6 +82,12 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let http_addr = std::env::var("KOSHA_HTTP_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
+        let http_port: u16 = std::env::var("KOSHA_HTTP_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3400);
+
         assert!(
             chunk_target_tokens > 0,
             "KOSHA_CHUNK_TARGET_TOKENS must be > 0"
@@ -104,6 +113,8 @@ impl Config {
             chunk_target_tokens,
             chunk_tolerance_tokens,
             chunk_overlap_tokens,
+            http_addr,
+            http_port,
         }
     }
 }
