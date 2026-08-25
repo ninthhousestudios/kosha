@@ -92,25 +92,52 @@ impl OnnxEmbedder {
 
 /// Retrieval prefixes `(query, document)` for models that require them.
 ///
-/// Asymmetric-prefix models (nomic, e5) and query-instruction models (bge-en/zh,
-/// mxbai) need these for correct retrieval; everything else (MiniLM, mpnet, gte,
-/// bge-m3, …) embeds raw text. mxbai-embed-large-v1 shares bge-en's query prompt
-/// (a document prefix would hurt it), so it groups with the bge-en/zh arm.
+/// Three shapes appear here, each verified against the model card:
+/// - **Asymmetric** — distinct query/document prefixes. nomic and modernbert-embed
+///   (which follows the nomic recipe) use `search_query:`/`search_document:`; e5 uses
+///   `query:`/`passage:`; embeddinggemma uses its own task-tagged prompts.
+/// - **Query-instruction only** — a query prompt, no document prefix (a document
+///   prefix would hurt these). bge-en/zh, mxbai-embed-large-v1, and the whole
+///   snowflake-arctic-embed family share the "Represent this sentence…" prompt.
+/// - **Raw text** — no prefix (the default arm): MiniLM, mpnet, gte-en-v1.5, bge-m3,
+///   jina-embeddings-v2, clip, and any model not listed above.
 fn prefixes_for(model: &EmbeddingModel) -> (&'static str, &'static str) {
     use EmbeddingModel::{
         BGEBaseENV15, BGEBaseENV15Q, BGELargeENV15, BGELargeENV15Q, BGELargeZHV15, BGESmallENV15,
-        BGESmallENV15Q, BGESmallZHV15, MultilingualE5Base, MultilingualE5Large,
-        MultilingualE5Small, MxbaiEmbedLargeV1, MxbaiEmbedLargeV1Q, NomicEmbedTextV1,
-        NomicEmbedTextV15, NomicEmbedTextV15Q,
+        BGESmallENV15Q, BGESmallZHV15, EmbeddingGemma300M, ModernBertEmbedLarge,
+        MultilingualE5Base, MultilingualE5Large, MultilingualE5Small, MxbaiEmbedLargeV1,
+        MxbaiEmbedLargeV1Q, NomicEmbedTextV1, NomicEmbedTextV15, NomicEmbedTextV15Q,
+        SnowflakeArcticEmbedL, SnowflakeArcticEmbedLQ, SnowflakeArcticEmbedM,
+        SnowflakeArcticEmbedMLong, SnowflakeArcticEmbedMLongQ, SnowflakeArcticEmbedMQ,
+        SnowflakeArcticEmbedS, SnowflakeArcticEmbedSQ, SnowflakeArcticEmbedXS,
+        SnowflakeArcticEmbedXSQ,
     };
     match model {
-        NomicEmbedTextV1 | NomicEmbedTextV15 | NomicEmbedTextV15Q => {
+        NomicEmbedTextV1 | NomicEmbedTextV15 | NomicEmbedTextV15Q | ModernBertEmbedLarge => {
             ("search_query: ", "search_document: ")
         }
         MultilingualE5Small | MultilingualE5Base | MultilingualE5Large => ("query: ", "passage: "),
-        BGESmallENV15 | BGESmallENV15Q | BGEBaseENV15 | BGEBaseENV15Q | BGELargeENV15
-        | BGELargeENV15Q | BGESmallZHV15 | BGELargeZHV15 | MxbaiEmbedLargeV1
-        | MxbaiEmbedLargeV1Q => (
+        EmbeddingGemma300M => ("task: search result | query: ", "title: none | text: "),
+        BGESmallENV15
+        | BGESmallENV15Q
+        | BGEBaseENV15
+        | BGEBaseENV15Q
+        | BGELargeENV15
+        | BGELargeENV15Q
+        | BGESmallZHV15
+        | BGELargeZHV15
+        | MxbaiEmbedLargeV1
+        | MxbaiEmbedLargeV1Q
+        | SnowflakeArcticEmbedXS
+        | SnowflakeArcticEmbedXSQ
+        | SnowflakeArcticEmbedS
+        | SnowflakeArcticEmbedSQ
+        | SnowflakeArcticEmbedM
+        | SnowflakeArcticEmbedMQ
+        | SnowflakeArcticEmbedMLong
+        | SnowflakeArcticEmbedMLongQ
+        | SnowflakeArcticEmbedL
+        | SnowflakeArcticEmbedLQ => (
             "Represent this sentence for searching relevant passages: ",
             "",
         ),
@@ -145,5 +172,74 @@ impl EmbedProvider for OnnxEmbedder {
 
     fn provider_name(&self) -> &str {
         "onnx"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefixes_for;
+    use fastembed::EmbeddingModel;
+
+    #[test]
+    fn nomic_and_modernbert_share_search_prefixes() {
+        // modernbert-embed follows the nomic recipe, so it shares the arm.
+        for m in [
+            EmbeddingModel::NomicEmbedTextV15,
+            EmbeddingModel::ModernBertEmbedLarge,
+        ] {
+            assert_eq!(
+                prefixes_for(&m),
+                ("search_query: ", "search_document: "),
+                "{m:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn e5_uses_query_passage() {
+        assert_eq!(
+            prefixes_for(&EmbeddingModel::MultilingualE5Small),
+            ("query: ", "passage: ")
+        );
+    }
+
+    #[test]
+    fn embeddinggemma_uses_task_tagged_prompts() {
+        assert_eq!(
+            prefixes_for(&EmbeddingModel::EmbeddingGemma300M),
+            ("task: search result | query: ", "title: none | text: ")
+        );
+    }
+
+    #[test]
+    fn bge_mxbai_and_snowflake_are_query_instruction_only() {
+        let expected = (
+            "Represent this sentence for searching relevant passages: ",
+            "",
+        );
+        for m in [
+            EmbeddingModel::BGESmallENV15,
+            EmbeddingModel::MxbaiEmbedLargeV1,
+            EmbeddingModel::SnowflakeArcticEmbedXS,
+            EmbeddingModel::SnowflakeArcticEmbedMLong,
+            EmbeddingModel::SnowflakeArcticEmbedLQ,
+        ] {
+            assert_eq!(prefixes_for(&m), expected, "{m:?}");
+        }
+    }
+
+    #[test]
+    fn raw_text_models_get_no_prefix() {
+        // gte-en-v1.5, jina-v2, and clip embed raw text — verified against their cards.
+        for m in [
+            EmbeddingModel::AllMiniLML6V2,
+            EmbeddingModel::AllMpnetBaseV2,
+            EmbeddingModel::BGEM3,
+            EmbeddingModel::GTELargeENV15,
+            EmbeddingModel::JinaEmbeddingsV2BaseEN,
+            EmbeddingModel::ClipVitB32,
+        ] {
+            assert_eq!(prefixes_for(&m), ("", ""), "{m:?}");
+        }
     }
 }
