@@ -563,9 +563,10 @@ async fn build_embedder(cfg: &Config, device: &str) -> Result<Arc<dyn EmbedProvi
                     .context("KOSHA_EMBED_MODEL required when KOSHA_EMBED_PROVIDER=onnx")?
                     .clone();
                 let batch = cfg.embed_batch_size;
-                tracing::info!(%model, "loading ONNX embedding model");
+                let dim_override = cfg.embed_dimension_override;
+                tracing::info!(%model, ?dim_override, "loading ONNX embedding model");
                 let embedder = tokio::task::spawn_blocking(move || {
-                    kosha::embed::OnnxEmbedder::load(&model, batch)
+                    kosha::embed::OnnxEmbedder::load(&model, batch, dim_override)
                 })
                 .await
                 .context("join error")?

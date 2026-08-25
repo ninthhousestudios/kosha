@@ -13,6 +13,11 @@ pub struct Config {
     pub embed_url: Option<String>,
     pub embed_model: Option<String>,
     pub embed_dimension: usize,
+    /// The explicitly-requested `KOSHA_EMBED_DIMENSION`, or `None` when unset.
+    /// `embed_dimension` folds the default in and so cannot distinguish "unset"
+    /// from "set to the default"; the onnx provider needs that distinction to
+    /// decide whether to Matryoshka-truncate.
+    pub embed_dimension_override: Option<usize>,
     pub embed_api_key: Option<String>,
     pub embed_batch_size: usize,
     // Chunking
@@ -55,10 +60,10 @@ impl Config {
         let embed_url = std::env::var("KOSHA_EMBED_URL").ok();
         let embed_model = std::env::var("KOSHA_EMBED_MODEL").ok();
 
-        let embed_dimension: usize = std::env::var("KOSHA_EMBED_DIMENSION")
+        let embed_dimension_override: Option<usize> = std::env::var("KOSHA_EMBED_DIMENSION")
             .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2048);
+            .and_then(|v| v.parse().ok());
+        let embed_dimension: usize = embed_dimension_override.unwrap_or(2048);
 
         let embed_api_key = std::env::var("KOSHA_EMBED_API_KEY").ok();
 
@@ -108,6 +113,7 @@ impl Config {
             embed_url,
             embed_model,
             embed_dimension,
+            embed_dimension_override,
             embed_api_key,
             embed_batch_size,
             chunk_target_tokens,
