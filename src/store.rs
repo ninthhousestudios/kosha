@@ -138,6 +138,10 @@ pub async fn insert_segment(
     Ok(actual_id)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one row's worth of chunk + embedding columns; candidate for a ChunkRow struct"
+)]
 pub async fn insert_chunk(
     pool: &PgPool,
     segment_id: Uuid,

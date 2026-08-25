@@ -1,10 +1,8 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 
-use super::EmbedProvider;
+use super::{BoxFuture, EmbedProvider};
 use crate::config::kosha_home;
 
 /// Text-only embedding provider backed by fastembed's ONNX `TextEmbedding`.
@@ -66,7 +64,7 @@ impl OnnxEmbedder {
         &self,
         texts: &[&str],
         prefix: &'static str,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<Vec<f32>>>> {
         let model = Arc::clone(&self.model);
         let batch_size = self.batch_size;
         let inputs: Vec<String> = if prefix.is_empty() {
@@ -124,14 +122,11 @@ impl EmbedProvider for OnnxEmbedder {
     fn embed_batch<'a>(
         &'a self,
         texts: &'a [&'a str],
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
+    ) -> BoxFuture<'a, anyhow::Result<Vec<Vec<f32>>>> {
         self.embed_prefixed(texts, self.doc_prefix)
     }
 
-    fn embed_query<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
+    fn embed_query<'a>(&'a self, text: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<f32>>> {
         let fut = self.embed_prefixed(&[text], self.query_prefix);
         Box::pin(async move {
             fut.await?

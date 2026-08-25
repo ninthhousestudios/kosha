@@ -146,11 +146,17 @@ async fn main() -> Result<()> {
 /// output dimensions. The printed name is the value to pass as KOSHA_EMBED_MODEL.
 fn run_models() -> Result<()> {
     let mut models = fastembed::TextEmbedding::list_supported_models();
-    models.sort_by(|a, b| a.model.to_string().cmp(&b.model.to_string()));
-    println!(
-        "{:<28} {:>5}  {}",
-        "MODEL (KOSHA_EMBED_MODEL)", "DIM", "DESCRIPTION"
-    );
+    models.sort_by_key(|m| m.model.to_string());
+    #[expect(
+        clippy::print_literal,
+        reason = "header literals kept as args so this format string stays identical to the data-row one below"
+    )]
+    {
+        println!(
+            "{:<28} {:>5}  {}",
+            "MODEL (KOSHA_EMBED_MODEL)", "DIM", "DESCRIPTION"
+        );
+    }
     for m in &models {
         println!(
             "{:<28} {:>5}  {}",
@@ -278,10 +284,16 @@ async fn run_list(
             return Ok(());
         }
 
-        println!(
-            "{:<12} {:<10} {:<12} {:>4} {:>6}  {}",
-            "HASH", "FORMAT", "COLLECTION", "SEG", "CHUNKS", "PATH"
-        );
+        #[expect(
+            clippy::print_literal,
+            reason = "header literals kept as args so this format string stays identical to the data-row one below"
+        )]
+        {
+            println!(
+                "{:<12} {:<10} {:<12} {:>4} {:>6}  {}",
+                "HASH", "FORMAT", "COLLECTION", "SEG", "CHUNKS", "PATH"
+            );
+        }
         for leaf in &leaves {
             let hash_short = if leaf.content_hash.len() > 10 {
                 &leaf.content_hash[..10]

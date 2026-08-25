@@ -1,8 +1,6 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
-use super::EmbedProvider;
+use super::{BoxFuture, EmbedProvider};
 
 pub struct HttpEmbedder {
     client: reqwest::Client,
@@ -64,7 +62,7 @@ impl EmbedProvider for HttpEmbedder {
     fn embed_batch<'a>(
         &'a self,
         texts: &'a [&'a str],
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
+    ) -> BoxFuture<'a, anyhow::Result<Vec<Vec<f32>>>> {
         Box::pin(async move {
             if texts.is_empty() {
                 return Ok(vec![]);

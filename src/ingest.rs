@@ -137,6 +137,10 @@ pub async fn ingest_file(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "ingest pipeline threads pool/embedder/content/hash/paths/config/collection/tags; candidate for an IngestCtx struct if it grows"
+)]
 async fn ingest_generic(
     pool: &PgPool,
     embedder: &dyn EmbedProvider,
@@ -189,6 +193,10 @@ async fn ingest_generic(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors ingest_generic's parameter list; candidate for a shared IngestCtx struct"
+)]
 async fn ingest_pdf_pipelined(
     pool: &PgPool,
     embedder: &dyn EmbedProvider,

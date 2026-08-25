@@ -15,16 +15,18 @@ pub use onnx::OnnxEmbedder;
 use std::future::Future;
 use std::pin::Pin;
 
+/// A `Send` boxed future, borrowing for `'a`. Every `EmbedProvider` method
+/// returns one: the trait predates native `async fn` in traits, so the futures
+/// are hand-boxed.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 pub trait EmbedProvider: Send + Sync {
     fn embed_batch<'a>(
         &'a self,
         texts: &'a [&'a str],
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>>;
+    ) -> BoxFuture<'a, anyhow::Result<Vec<Vec<f32>>>>;
 
-    fn embed_one<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
+    fn embed_one<'a>(&'a self, text: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<f32>>> {
         Box::pin(async move {
             let mut batch = self.embed_batch(&[text]).await?;
             batch
@@ -33,17 +35,14 @@ pub trait EmbedProvider: Send + Sync {
         })
     }
 
-    fn embed_query<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
+    fn embed_query<'a>(&'a self, text: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<f32>>> {
         self.embed_one(text)
     }
 
     fn embed_image_bytes(
         &self,
         images: Vec<Vec<u8>>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<Vec<f32>>>> {
         let _ = images;
         Box::pin(async {
             Err(anyhow::anyhow!(

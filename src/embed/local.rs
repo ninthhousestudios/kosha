@@ -1,11 +1,9 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use candle_core::{DType, Device};
 use fastembed::Qwen3VLEmbedding;
 
-use super::EmbedProvider;
+use super::{BoxFuture, EmbedProvider};
 
 pub struct LocalEmbedder {
     model: Arc<Qwen3VLEmbedding>,
@@ -28,10 +26,7 @@ impl LocalEmbedder {
     /// to `Vec<String>` first because `spawn_blocking` demands a `'static`
     /// closure — the owned copy is a thread-boundary requirement, not a
     /// borrow-checker workaround.
-    fn embed_owned(
-        &self,
-        texts: Vec<String>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    fn embed_owned(&self, texts: Vec<String>) -> BoxFuture<'_, anyhow::Result<Vec<Vec<f32>>>> {
         let model = Arc::clone(&self.model);
         Box::pin(async move {
             if texts.is_empty() {
@@ -53,14 +48,11 @@ impl EmbedProvider for LocalEmbedder {
     fn embed_batch<'a>(
         &'a self,
         texts: &'a [&'a str],
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
+    ) -> BoxFuture<'a, anyhow::Result<Vec<Vec<f32>>>> {
         self.embed_owned(texts.iter().map(|&s| s.to_string()).collect())
     }
 
-    fn embed_query<'a>(
-        &'a self,
-        text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
+    fn embed_query<'a>(&'a self, text: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<f32>>> {
         let prefixed = format!(
             "Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery:{text}"
         );
@@ -75,7 +67,7 @@ impl EmbedProvider for LocalEmbedder {
     fn embed_image_bytes(
         &self,
         images: Vec<Vec<u8>>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<Vec<f32>>>> {
         let model = Arc::clone(&self.model);
         Box::pin(async move {
             if images.is_empty() {

@@ -37,7 +37,7 @@ impl Decomposer for PlainTextDecomposer {
 
             let prev_is_sticky = current_parts
                 .last()
-                .map_or(false, |p| p.len() <= STICKY_THRESHOLD);
+                .is_some_and(|p| p.len() <= STICKY_THRESHOLD);
             let over_budget = current_len + para_len > SEGMENT_TARGET_CHARS;
             let para_is_sticky = para_len <= STICKY_THRESHOLD;
 
@@ -51,7 +51,7 @@ impl Decomposer for PlainTextDecomposer {
                 while current_parts.len() > 1
                     && current_parts
                         .last()
-                        .map_or(false, |p| p.len() <= STICKY_THRESHOLD)
+                        .is_some_and(|p| p.len() <= STICKY_THRESHOLD)
                 {
                     carry.push(
                         current_parts
@@ -89,10 +89,11 @@ impl Decomposer for PlainTextDecomposer {
 }
 
 fn make_label(parts: &[&str]) -> String {
-    let first = parts[0];
+    let Some(first) = parts.first().copied() else {
+        return "section".to_string();
+    };
     let trimmed = first.lines().next().unwrap_or(first);
-    let trimmed =
-        trimmed.trim_start_matches(|c: char| c == '-' || c == ' ' || c == '=' || c == '#');
+    let trimmed = trimmed.trim_start_matches(['-', ' ', '=', '#']);
     let trimmed = trimmed.trim();
     if trimmed.is_empty() || trimmed.len() > 80 {
         return "section".to_string();

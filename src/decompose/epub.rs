@@ -138,7 +138,7 @@ fn try_ncx_toc(
         .iter()
         .find(|(_, v)| v.ends_with(".ncx"))
         .map(|(_, v)| v.as_str())?;
-    let ncx_path = resolve_href(opf_dir, &ncx_href);
+    let ncx_path = resolve_href(opf_dir, ncx_href);
     let ncx = read_zip_entry(archive, &ncx_path).ok()?;
     Some(parse_ncx_nav_points(&ncx))
 }
@@ -194,10 +194,10 @@ fn parse_ncx_nav_points(ncx: &str) -> HashMap<String, String> {
             .and_then(|s| get_attr(&block[s..], "src"))
             .map(|s| s.split('#').next().unwrap_or(&s).to_string());
 
-        if let (Some(label), Some(src)) = (label, src) {
-            if !label.is_empty() {
-                toc.entry(src).or_insert(label);
-            }
+        if let (Some(label), Some(src)) = (label, src)
+            && !label.is_empty()
+        {
+            toc.entry(src).or_insert(label);
         }
         search_from = abs + 1;
     }
@@ -267,8 +267,8 @@ fn extract_attr(xml: &str, element: &str, attr: &str) -> Option<String> {
 }
 
 fn resolve_href(base_dir: &str, href: &str) -> String {
-    if href.starts_with('/') {
-        href[1..].to_string()
+    if let Some(rest) = href.strip_prefix('/') {
+        rest.to_string()
     } else if base_dir.is_empty() {
         href.to_string()
     } else {
