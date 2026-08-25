@@ -1,10 +1,13 @@
 mod http;
+#[cfg(feature = "candle-backend")]
 mod local;
 #[cfg(feature = "onnx")]
 mod onnx;
 
+#[cfg(feature = "candle-backend")]
 pub use candle_core::Device;
 pub use http::HttpEmbedder;
+#[cfg(feature = "candle-backend")]
 pub use local::LocalEmbedder;
 #[cfg(feature = "onnx")]
 pub use onnx::OnnxEmbedder;

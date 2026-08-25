@@ -10,7 +10,7 @@ use kosha::{
     chunk::ChunkConfig,
     config::Config,
     db,
-    embed::{Device, EmbedProvider, HttpEmbedder, LocalEmbedder},
+    embed::{EmbedProvider, HttpEmbedder},
     mcp::KoshaServer,
     tools::SearchArgs,
 };
@@ -106,9 +106,12 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let device = resolve_device(&cli.device)?;
+    // The `--device` string is resolved to a concrete candle device lazily,
+    // inside the (candle-gated) local-embedder path — the onnx/http providers
+    // ignore it, and the candle `Device` type is absent from onnx-only builds.
+    let Cli { device, command } = cli;
 
-    match cli.command {
+    match command {
         Commands::Serve { http } => {
             if http {
                 run_serve_http(cfg, &device).await
@@ -159,7 +162,7 @@ fn run_models() -> Result<()> {
     Ok(())
 }
 
-async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
+async fn run_serve(cfg: Config, device: &str) -> Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "kosha starting");
 
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
@@ -191,7 +194,7 @@ async fn run_serve(cfg: Config, device: &Device) -> Result<()> {
 /// stdio MCP. Same pool/embedder setup as `run_serve`; the backend calls this
 /// from behind its own op surface. Listen address comes from `KOSHA_HTTP_ADDR`/
 /// `KOSHA_HTTP_PORT` (default `0.0.0.0:3400`).
-async fn run_serve_http(cfg: Config, device: &Device) -> Result<()> {
+async fn run_serve_http(cfg: Config, device: &str) -> Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "kosha HTTP starting");
 
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
@@ -307,7 +310,7 @@ async fn run_ingest(
     recursive: bool,
     collection: &str,
     tags: &[String],
-    device: &Device,
+    device: &str,
 ) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool)
@@ -395,7 +398,7 @@ async fn run_search(
     tags: Vec<String>,
     limit: i64,
     json: bool,
-    device: &Device,
+    device: &str,
 ) -> Result<()> {
     let pool = db::create_pool(&cfg).await.context("creating DB pool")?;
     db::run_migrations(&pool)
@@ -452,7 +455,12 @@ async fn run_search(
     Ok(())
 }
 
-fn resolve_device(s: &str) -> Result<Device> {
+/// Resolve the `--device` string to a concrete candle device. Only the local
+/// (candle) embedder consumes a device, so this and the `Device` type exist
+/// only in candle-backend builds.
+#[cfg(feature = "candle-backend")]
+fn resolve_device(s: &str) -> Result<kosha::embed::Device> {
+    use kosha::embed::Device;
     match s {
         "cpu" => Ok(Device::Cpu),
         "gpu" => {
@@ -488,19 +496,30 @@ fn resolve_device(s: &str) -> Result<Device> {
     }
 }
 
-async fn build_embedder(cfg: &Config, device: &Device) -> Result<Arc<dyn EmbedProvider>> {
+async fn build_embedder(cfg: &Config, device: &str) -> Result<Arc<dyn EmbedProvider>> {
     match cfg.embed_provider.as_str() {
         "local" => {
-            let repo = cfg.model_repo.clone();
-            let dim = cfg.embed_dimension;
-            let dev = device.clone();
-            tracing::info!(%repo, dim, device = ?dev, "loading local embedding model");
-            let embedder =
-                tokio::task::spawn_blocking(move || LocalEmbedder::load(&repo, dim, &dev))
-                    .await
-                    .context("join error")?
-                    .context("loading local embedder")?;
-            Ok(Arc::new(embedder))
+            #[cfg(feature = "candle-backend")]
+            {
+                let repo = cfg.model_repo.clone();
+                let dim = cfg.embed_dimension;
+                let dev = resolve_device(device)?;
+                tracing::info!(%repo, dim, device = ?dev, "loading local embedding model");
+                let embedder = tokio::task::spawn_blocking(move || {
+                    kosha::embed::LocalEmbedder::load(&repo, dim, &dev)
+                })
+                .await
+                .context("join error")?
+                .context("loading local embedder")?;
+                Ok(Arc::new(embedder))
+            }
+            #[cfg(not(feature = "candle-backend"))]
+            {
+                let _ = device;
+                anyhow::bail!(
+                    "KOSHA_EMBED_PROVIDER=local requires kosha built with the candle-backend feature (the default build)"
+                )
+            }
         }
         "http" => {
             let url = cfg
