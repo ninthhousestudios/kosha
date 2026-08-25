@@ -104,7 +104,34 @@ Exposes these MCP tools:
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
-The `--device` flag controls where the embedding model runs. `auto` tries CUDA if available, falls back to CPU. `gpu` requires building with the `cuda` feature (see below).
+The `--device` flag controls where the embedding model runs. `auto` tries CUDA if available, falls back to CPU. `gpu` requires building with the `cuda` feature (see below). It applies only to the default candle backend.
+
+## Embedding backends
+
+kosha builds with one of two on-device embedding backends, selected at compile time. They are mutually exclusive — the `onnx` build links a prebuilt ONNX Runtime that the candle path never touches.
+
+| Build | Feature flags | Model | Modality |
+|---|---|---|---|
+| **candle** (default) | `candle-backend` | Qwen3-VL-Embedding-2B | text **and** images, one 2048-dim space |
+| **onnx** | `--no-default-features --features onnx` | any fastembed ONNX model | text only |
+
+```bash
+# Default multimodal build (candle)
+cargo build --release
+
+# Text-only ONNX build (lighter; no candle/CUDA toolchain, no image embedding)
+cargo build --release --no-default-features --features onnx
+```
+
+At runtime, `KOSHA_EMBED_PROVIDER` selects the provider — but a provider only works if the matching backend was compiled in:
+
+| Provider | Requires build | Description |
+|---|---|---|
+| `local` | candle (default) | On-device multimodal Qwen3-VL. Model from `KOSHA_MODEL_REPO`. |
+| `onnx` | `--features onnx` | On-device text-only ONNX via fastembed. Model from `KOSHA_EMBED_MODEL` (a fastembed key, e.g. `AllMiniLML6V2`, `NomicEmbedTextV15`, `BGEM3`, `MultilingualE5Small`). |
+| `http` | either | Remote OpenAI-compatible API. Model from `KOSHA_EMBED_MODEL`. |
+
+The `onnx` provider is text-only: image segments (scanned PDF pages, standalone images) cannot be embedded, so cross-modal retrieval is unavailable in that build. Set `KOSHA_EMBED_DIMENSION` below a model's native dimension to request Matryoshka truncation — honored only for Matryoshka-trained models, rejected otherwise.
 
 ## Configuration
 
@@ -120,11 +147,11 @@ All configuration is via environment variables. Place them in a `.env` file in t
 
 | Variable | Default | Description |
 |---|---|---|
-| `KOSHA_EMBED_PROVIDER` | `local` | `local` (on-device) or `http` (remote API) |
-| `KOSHA_MODEL_REPO` | `Qwen/Qwen3-VL-Embedding-2B` | HuggingFace repo for local provider |
-| `KOSHA_EMBED_DIMENSION` | `2048` | Embedding dimension |
+| `KOSHA_EMBED_PROVIDER` | `local` | `local` (candle, on-device), `onnx` (text-only ONNX, on-device), or `http` (remote API). See [Embedding backends](#embedding-backends) |
+| `KOSHA_MODEL_REPO` | `Qwen/Qwen3-VL-Embedding-2B` | HuggingFace repo for the `local` provider |
+| `KOSHA_EMBED_DIMENSION` | `2048` | Embedding dimension. For `onnx`, a value below the model's native dimension requests Matryoshka truncation |
 | `KOSHA_EMBED_URL` | — | API endpoint (required for `http` provider) |
-| `KOSHA_EMBED_MODEL` | — | Model name (required for `http` provider) |
+| `KOSHA_EMBED_MODEL` | — | Model name/key (required for `http` and `onnx` providers) |
 | `KOSHA_EMBED_API_KEY` | — | Bearer token for `http` provider |
 | `KOSHA_EMBED_BATCH_SIZE` | `32` | Batch size for `http` provider |
 
@@ -148,7 +175,7 @@ All configuration is via environment variables. Place them in a `.env` file in t
 
 ## GPU support
 
-By default, kosha embeds on CPU using candle with BF16 matrix multiplication. For faster embedding on NVIDIA GPUs, build with the `cuda` feature:
+By default, kosha embeds on CPU using candle with BF16 matrix multiplication. For faster embedding on NVIDIA GPUs, build with the `cuda` feature (candle backend only):
 
 ```bash
 cargo build --release --features cuda
@@ -188,7 +215,8 @@ src/
     image.rs       PNG/JPG as single segments
     plain_text.rs  Fallback plain text
   embed/           Embedding providers
-    local.rs       On-device via fastembed + candle
+    local.rs       On-device multimodal via candle (candle-backend)
+    onnx.rs        On-device text-only via fastembed ONNX (onnx feature)
     http.rs        Remote API (OpenAI-compatible)
   tools/           MCP tool implementations
 migrations/        SQL migrations (run automatically)
