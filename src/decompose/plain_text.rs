@@ -167,11 +167,7 @@ mod tests {
     fn no_content_lost() {
         let text = "First.\n\nSecond.\n\n--- heading\n\nThird paragraph here.\n\nFourth paragraph.";
         let segs = decompose(text);
-        let merged: String = segs
-            .iter()
-            .map(|s| seg_text(s))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let merged: String = segs.iter().map(seg_text).collect::<Vec<_>>().join("\n\n");
         let original_nonws: String = text.chars().filter(|c| !c.is_whitespace()).collect();
         let merged_nonws: String = merged.chars().filter(|c| !c.is_whitespace()).collect();
         assert_eq!(original_nonws, merged_nonws);
