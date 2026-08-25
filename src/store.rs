@@ -138,23 +138,33 @@ pub async fn insert_segment(
     Ok(actual_id)
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one row's worth of chunk + embedding columns; candidate for a ChunkRow struct"
-)]
-pub async fn insert_chunk(
-    pool: &PgPool,
-    segment_id: Uuid,
-    chunk_index: i32,
-    leaf_id: &str,
-    segment_index: i32,
-    chunk_label: &str,
-    content_text: Option<&str>,
-    embedding: &[f32],
-    embed_provider: &str,
-    embed_model: &str,
-    embed_dimension: i32,
-) -> Result<()> {
+/// One chunk row's worth of chunk + embedding columns for [`insert_chunk`].
+pub struct ChunkInsert<'a> {
+    pub segment_id: Uuid,
+    pub chunk_index: i32,
+    pub leaf_id: &'a str,
+    pub segment_index: i32,
+    pub chunk_label: &'a str,
+    pub content_text: Option<&'a str>,
+    pub embedding: &'a [f32],
+    pub embed_provider: &'a str,
+    pub embed_model: &'a str,
+    pub embed_dimension: i32,
+}
+
+pub async fn insert_chunk(pool: &PgPool, row: ChunkInsert<'_>) -> Result<()> {
+    let ChunkInsert {
+        segment_id,
+        chunk_index,
+        leaf_id,
+        segment_index,
+        chunk_label,
+        content_text,
+        embedding,
+        embed_provider,
+        embed_model,
+        embed_dimension,
+    } = row;
     let id = Uuid::now_v7();
     let hv = f32_to_halfvec(embedding);
     sqlx::query(

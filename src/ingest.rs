@@ -109,49 +109,47 @@ pub async fn ingest_file(
 
     let is_pdf = path.extension().and_then(|e| e.to_str()) == Some("pdf");
 
+    let ctx = IngestCtx {
+        pool,
+        embedder,
+        content: &content,
+        content_hash: &content_hash,
+        source_path: &source_path,
+        chunk_cfg,
+        collection,
+        tags,
+    };
+
     if is_pdf {
-        ingest_pdf_pipelined(
-            pool,
-            embedder,
-            &content,
-            &content_hash,
-            &source_path,
-            chunk_cfg,
-            collection,
-            tags,
-        )
-        .await
+        ingest_pdf_pipelined(&ctx).await
     } else {
-        ingest_generic(
-            pool,
-            embedder,
-            path,
-            &content,
-            &content_hash,
-            &source_path,
-            chunk_cfg,
-            collection,
-            tags,
-        )
-        .await
+        ingest_generic(&ctx, path).await
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "ingest pipeline threads pool/embedder/content/hash/paths/config/collection/tags; candidate for an IngestCtx struct if it grows"
-)]
-async fn ingest_generic(
-    pool: &PgPool,
-    embedder: &dyn EmbedProvider,
-    path: &Path,
-    content: &[u8],
-    content_hash: &str,
-    source_path: &str,
-    chunk_cfg: &ChunkConfig,
-    collection: &str,
-    tags: &[String],
-) -> anyhow::Result<IngestResult> {
+/// Params shared by the ingest entry points, threaded as one borrow.
+struct IngestCtx<'a> {
+    pool: &'a PgPool,
+    embedder: &'a dyn EmbedProvider,
+    content: &'a [u8],
+    content_hash: &'a str,
+    source_path: &'a str,
+    chunk_cfg: &'a ChunkConfig,
+    collection: &'a str,
+    tags: &'a [String],
+}
+
+async fn ingest_generic(ctx: &IngestCtx<'_>, path: &Path) -> anyhow::Result<IngestResult> {
+    let &IngestCtx {
+        pool,
+        embedder,
+        content,
+        content_hash,
+        source_path,
+        chunk_cfg,
+        collection,
+        tags,
+    } = ctx;
     let decomposer = decomposer_for(path);
     let format_name = decomposer.format_name();
     let segments = decomposer.decompose(content, source_path)?;
@@ -193,20 +191,17 @@ async fn ingest_generic(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors ingest_generic's parameter list; candidate for a shared IngestCtx struct"
-)]
-async fn ingest_pdf_pipelined(
-    pool: &PgPool,
-    embedder: &dyn EmbedProvider,
-    content: &[u8],
-    content_hash: &str,
-    source_path: &str,
-    chunk_cfg: &ChunkConfig,
-    collection: &str,
-    tags: &[String],
-) -> anyhow::Result<IngestResult> {
+async fn ingest_pdf_pipelined(ctx: &IngestCtx<'_>) -> anyhow::Result<IngestResult> {
+    let &IngestCtx {
+        pool,
+        embedder,
+        content,
+        content_hash,
+        source_path,
+        chunk_cfg,
+        collection,
+        tags,
+    } = ctx;
     let (tx, rx) = mpsc::sync_channel::<crate::decompose::Segment>(8);
 
     let content_owned = content.to_vec();
@@ -308,16 +303,18 @@ async fn ingest_one_segment(
             for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
                 store::insert_chunk(
                     pool,
-                    segment_id,
-                    ch.index as i32,
-                    content_hash,
-                    seg.index as i32,
-                    &ch.label,
-                    Some(&ch.content),
-                    emb,
-                    embedder.provider_name(),
-                    embedder.model_name(),
-                    embedder.dimension() as i32,
+                    store::ChunkInsert {
+                        segment_id,
+                        chunk_index: ch.index as i32,
+                        leaf_id: content_hash,
+                        segment_index: seg.index as i32,
+                        chunk_label: &ch.label,
+                        content_text: Some(&ch.content),
+                        embedding: emb,
+                        embed_provider: embedder.provider_name(),
+                        embed_model: embedder.model_name(),
+                        embed_dimension: embedder.dimension() as i32,
+                    },
                 )
                 .await?;
                 chunk_count += 1;
@@ -336,16 +333,18 @@ async fn ingest_one_segment(
 
             store::insert_chunk(
                 pool,
-                segment_id,
-                0,
-                content_hash,
-                seg.index as i32,
-                &seg.label,
-                None,
-                &emb,
-                embedder.provider_name(),
-                embedder.model_name(),
-                embedder.dimension() as i32,
+                store::ChunkInsert {
+                    segment_id,
+                    chunk_index: 0,
+                    leaf_id: content_hash,
+                    segment_index: seg.index as i32,
+                    chunk_label: &seg.label,
+                    content_text: None,
+                    embedding: &emb,
+                    embed_provider: embedder.provider_name(),
+                    embed_model: embedder.model_name(),
+                    embed_dimension: embedder.dimension() as i32,
+                },
             )
             .await?;
             chunk_count += 1;
