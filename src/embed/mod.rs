@@ -13,27 +13,27 @@ use std::future::Future;
 use std::pin::Pin;
 
 pub trait EmbedProvider: Send + Sync {
-    fn embed_batch(
-        &self,
-        texts: Vec<String>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>>;
+    fn embed_batch<'a>(
+        &'a self,
+        texts: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>>;
 
-    fn embed_one(
-        &self,
-        text: String,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
+    fn embed_one<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
         Box::pin(async move {
-            let mut batch = self.embed_batch(vec![text]).await?;
+            let mut batch = self.embed_batch(&[text]).await?;
             batch
                 .pop()
                 .ok_or_else(|| anyhow::anyhow!("empty embedding result"))
         })
     }
 
-    fn embed_query(
-        &self,
-        text: String,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
+    fn embed_query<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
         self.embed_one(text)
     }
 

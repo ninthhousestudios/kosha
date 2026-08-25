@@ -23,10 +23,12 @@ impl LocalEmbedder {
             dim: dimension,
         })
     }
-}
 
-impl EmbedProvider for LocalEmbedder {
-    fn embed_batch(
+    /// Embed already-owned texts on the blocking pool. Borrowed callers convert
+    /// to `Vec<String>` first because `spawn_blocking` demands a `'static`
+    /// closure — the owned copy is a thread-boundary requirement, not a
+    /// borrow-checker workaround.
+    fn embed_owned(
         &self,
         texts: Vec<String>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
@@ -45,15 +47,29 @@ impl EmbedProvider for LocalEmbedder {
             .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         })
     }
+}
 
-    fn embed_query(
-        &self,
-        text: String,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
+impl EmbedProvider for LocalEmbedder {
+    fn embed_batch<'a>(
+        &'a self,
+        texts: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
+        self.embed_owned(texts.iter().map(|&s| s.to_string()).collect())
+    }
+
+    fn embed_query<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
         let prefixed = format!(
             "Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery:{text}"
         );
-        self.embed_one(prefixed)
+        let fut = self.embed_owned(vec![prefixed]);
+        Box::pin(async move {
+            fut.await?
+                .pop()
+                .ok_or_else(|| anyhow::anyhow!("empty embedding result"))
+        })
     }
 
     fn embed_image_bytes(

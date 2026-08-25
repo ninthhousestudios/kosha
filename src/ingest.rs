@@ -294,8 +294,8 @@ async fn ingest_one_segment(
                     .await?;
 
             let chunks = chunk::chunk_segment(text, &seg.label, chunk_cfg);
-            let chunk_texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-            let embeddings = embedder.embed_batch(chunk_texts).await?;
+            let chunk_refs: Vec<&str> = chunks.iter().map(|c| c.content.as_str()).collect();
+            let embeddings = embedder.embed_batch(&chunk_refs).await?;
 
             for (ch, emb) in chunks.iter().zip(embeddings.iter()) {
                 store::insert_chunk(

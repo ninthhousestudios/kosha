@@ -57,23 +57,28 @@ impl OnnxEmbedder {
     }
 
     /// Embed `texts`, prepending `prefix` to each (the model's retrieval instruction).
+    ///
+    /// `inputs` is built up front (synchronously) so the returned future owns its
+    /// data: `spawn_blocking` demands a `'static` closure, and reading the borrowed
+    /// `texts` before crossing that boundary is a thread requirement, not a
+    /// borrow-checker workaround.
     fn embed_prefixed(
         &self,
-        texts: Vec<String>,
+        texts: &[&str],
         prefix: &'static str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
         let model = Arc::clone(&self.model);
         let batch_size = self.batch_size;
+        let inputs: Vec<String> = if prefix.is_empty() {
+            texts.iter().map(|&t| t.to_string()).collect()
+        } else {
+            texts.iter().map(|&t| format!("{prefix}{t}")).collect()
+        };
         Box::pin(async move {
-            if texts.is_empty() {
+            if inputs.is_empty() {
                 return Ok(vec![]);
             }
             tokio::task::spawn_blocking(move || {
-                let inputs: Vec<String> = if prefix.is_empty() {
-                    texts
-                } else {
-                    texts.into_iter().map(|t| format!("{prefix}{t}")).collect()
-                };
                 let mut guard = model
                     .lock()
                     .map_err(|e| anyhow::anyhow!("embedder mutex poisoned: {e}"))?;
@@ -116,18 +121,18 @@ fn prefixes_for(model: &EmbeddingModel) -> (&'static str, &'static str) {
 }
 
 impl EmbedProvider for OnnxEmbedder {
-    fn embed_batch(
-        &self,
-        texts: Vec<String>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    fn embed_batch<'a>(
+        &'a self,
+        texts: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
         self.embed_prefixed(texts, self.doc_prefix)
     }
 
-    fn embed_query(
-        &self,
-        text: String,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + '_>> {
-        let fut = self.embed_prefixed(vec![text], self.query_prefix);
+    fn embed_query<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<f32>>> + Send + 'a>> {
+        let fut = self.embed_prefixed(&[text], self.query_prefix);
         Box::pin(async move {
             fut.await?
                 .pop()

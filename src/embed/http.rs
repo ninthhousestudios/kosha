@@ -37,9 +37,9 @@ impl HttpEmbedder {
 }
 
 #[derive(serde::Serialize)]
-struct EmbedRequest {
-    model: String,
-    input: Vec<String>,
+struct EmbedRequest<'a> {
+    model: &'a str,
+    input: &'a [&'a str],
 }
 
 #[derive(serde::Deserialize)]
@@ -61,10 +61,10 @@ struct EmbedErrorBody {
 }
 
 impl EmbedProvider for HttpEmbedder {
-    fn embed_batch(
-        &self,
-        texts: Vec<String>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + '_>> {
+    fn embed_batch<'a>(
+        &'a self,
+        texts: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<Vec<f32>>>> + Send + 'a>> {
         Box::pin(async move {
             if texts.is_empty() {
                 return Ok(vec![]);
@@ -74,11 +74,11 @@ impl EmbedProvider for HttpEmbedder {
 
             for batch_start in (0..texts.len()).step_by(self.batch_size) {
                 let batch_end = (batch_start + self.batch_size).min(texts.len());
-                let batch: Vec<String> = texts[batch_start..batch_end].to_vec();
+                let batch: &[&str] = &texts[batch_start..batch_end];
                 let batch_len = batch.len();
 
                 let mut req = self.client.post(&self.url).json(&EmbedRequest {
-                    model: self.model.clone(),
+                    model: self.model.as_str(),
                     input: batch,
                 });
 
