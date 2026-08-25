@@ -1,0 +1,8 @@
+target/
+.git/
+.sutra/
+.handoffs/
+.ruff_cache/
+.claude/
+test-data/
+*.dump
