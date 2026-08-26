@@ -27,8 +27,11 @@ RUN cargo build --release --no-default-features --features onnx
 # install their runtime packages, which pull glib/gobject/gio transitively.
 # Must match the builder's glibc (2.41), so trixie here too.
 FROM debian:trixie-slim AS runtime
+# curl is used only by the container HEALTHCHECK (the deploy compose probes
+# GET /health); libpoppler-glib8 + libcairo2 are the decompose engine's runtime
+# deps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
+        ca-certificates curl \
         libpoppler-glib8 libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
