@@ -89,6 +89,7 @@ Exposes these MCP tools:
 | Tool | Purpose |
 |---|---|
 | `kosha_search` | Semantic search across all segments |
+| `kosha_document` | Fetch a whole document by stable `source_id` (all segments reassembled) |
 | `kosha_read` | Fetch a segment by leaf hash and segment index |
 | `kosha_outline` | Segment outline for a document |
 | `kosha_leaf` | Metadata for a single document |

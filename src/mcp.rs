@@ -69,6 +69,19 @@ impl KoshaServer {
     }
 
     #[tool(
+        description = "Fetch a whole document by its stable source_id (a search hit's source_path reduced to its file stem, e.g. `dhata-rakshasa`). Returns the full reassembled text (every segment, in order) plus title and format — where kosha_read returns one segment/chunk keyed by the internal leaf_id, this returns the complete document from a caller-facing id. Optional: collections to scope resolution. Use after kosha_search to read the whole source behind a chunk hit."
+    )]
+    pub async fn kosha_document(
+        &self,
+        Parameters(args): Parameters<tools::DocumentArgs>,
+    ) -> Result<String, ErrorData> {
+        let out = tools::document::handle(&self.pool, args)
+            .await
+            .map_err(kosha_to_rmcp)?;
+        serde_json::to_string(&out).map_err(json_to_rmcp)
+    }
+
+    #[tool(
         description = "Get metadata for a single ingested leaf (document). Returns format, segment/chunk counts, status, source path, and content hash."
     )]
     pub async fn kosha_leaf(

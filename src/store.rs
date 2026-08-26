@@ -542,6 +542,85 @@ pub async fn read_segment(
     Ok(row.map(Into::into))
 }
 
+// ── Document reassembly ──
+
+/// A whole leaf reassembled from its ordered segments — the "full document" a
+/// `source_id` resolves to. Chunks are embedding-sized sub-slices of segments;
+/// segments hold the complete text, so the document is their in-order join.
+#[derive(Debug)]
+pub struct DocumentRecord {
+    pub title: Option<String>,
+    pub format: String,
+    pub content: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct DocLeafRow {
+    content_hash: String,
+    format: String,
+    title: Option<String>,
+}
+
+/// Resolve a stable `source_id` (a `source_path` file stem — e.g.
+/// `dhata-rakshasa` for `data/adityas/dhata-rakshasa.txt`) to its whole
+/// document. Matches ready leaves whose `source_path` stem equals `source_id`,
+/// optionally scoped to `collections`, then reassembles every segment in
+/// `segment_index` order (joined `\n\n`). Returns `None` when nothing matches;
+/// errors only on a genuinely ambiguous id (two leaves share a stem).
+pub async fn read_document_by_source_id(
+    pool: &PgPool,
+    source_id: &str,
+    collections: Option<&[String]>,
+) -> Result<Option<DocumentRecord>> {
+    let coll_vec: Option<Vec<String>> = collections.map(|c| c.to_vec());
+    // The file stem of source_path: strip the directory (everything up to the
+    // last '/') then the trailing '.<ext>'. Mirrors Rust's Path::file_stem,
+    // which is exactly how the backend derives the source_id it hands back here.
+    let leaves = sqlx::query_as::<_, DocLeafRow>(
+        "SELECT content_hash, format, title
+         FROM leaves
+         WHERE status = 'ready'
+           AND regexp_replace(regexp_replace(source_path, '^.*/', ''), '\\.[^.]*$', '') = $1
+           AND ($2::text[] IS NULL OR collection = ANY($2))
+         LIMIT 2",
+    )
+    .bind(source_id)
+    .bind(&coll_vec)
+    .fetch_all(pool)
+    .await?;
+
+    let mut iter = leaves.into_iter();
+    let leaf = match (iter.next(), iter.next()) {
+        (None, _) => return Ok(None),
+        (Some(leaf), None) => leaf,
+        (Some(_), Some(_)) => {
+            return Err(crate::error::KoshaError::Internal {
+                tool: "document",
+                message: format!("ambiguous source_id '{source_id}' — matches multiple leaves"),
+            });
+        }
+    };
+
+    let segments = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT content_text FROM segments WHERE leaf_id = $1 ORDER BY segment_index",
+    )
+    .bind(&leaf.content_hash)
+    .fetch_all(pool)
+    .await?;
+
+    let content = segments
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    Ok(Some(DocumentRecord {
+        title: leaf.title,
+        format: leaf.format,
+        content,
+    }))
+}
+
 // ── Tags ──
 
 pub async fn leaf_tags(pool: &PgPool, leaf_id: &str) -> Result<Vec<String>> {
