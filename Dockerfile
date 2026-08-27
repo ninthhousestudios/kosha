@@ -26,7 +26,7 @@ COPY . .
 # runtime stage COPYs that path.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/build/target \
+    --mount=type=cache,target=/build/target,id=kosha-target \
     cargo build --release --no-default-features --features onnx \
     && cp target/release/kosha /usr/local/bin/kosha
 
