@@ -20,7 +20,15 @@ WORKDIR /build
 COPY . .
 # ONNX Runtime is statically linked under the onnx feature (verified: the binary
 # has no libonnxruntime.so dependency), so the runtime stage needs no ORT lib.
-RUN cargo build --release --no-default-features --features onnx
+# BuildKit cache mounts persist the cargo registry/git index and target/ across
+# builds so unchanged deps aren't recompiled. target/ is not in the committed
+# layer, so copy the binary out to /usr/local/bin before the RUN ends — the
+# runtime stage COPYs that path.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --no-default-features --features onnx \
+    && cp target/release/kosha /usr/local/bin/kosha
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
 # The binary dynamically links poppler-glib + cairo (the decompose engine);
@@ -35,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpoppler-glib8 libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /build/target/release/kosha /usr/local/bin/kosha
+COPY --from=build /usr/local/bin/kosha /usr/local/bin/kosha
 
 # fastembed downloads the embedding model on first use into KOSHA_HOME/models;
 # mount a volume at /data/kosha to persist it across restarts (see ai/36d).
