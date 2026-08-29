@@ -78,9 +78,27 @@ async fn health(State(state): State<HttpState>) -> Response {
 /// the one the corpus was ingested with (onnx `NomicEmbedTextV15`, 768-dim) or
 /// cosine ranking is meaningless.
 async fn search(State(state): State<HttpState>, Json(args): Json<SearchArgs>) -> Response {
+    let query = args.query.clone();
+    let collections = args.collections.clone();
+    let tags = args.tags.clone();
+    let limit = args.limit;
     match tools::search::handle(&state.pool, &*state.embedder, args).await {
-        Ok(out) => Json(out).into_response(),
-        Err(e) => ApiError(e).into_response(),
+        Ok(out) => {
+            tracing::info!(
+                route = "/search",
+                query,
+                collections = ?collections,
+                tags = ?tags,
+                limit = ?limit,
+                result_count = out.count,
+                "search answered"
+            );
+            Json(out).into_response()
+        }
+        Err(e) => {
+            tracing::warn!(route = "/search", query, error = %e, "search failed");
+            ApiError(e).into_response()
+        }
     }
 }
 
@@ -91,9 +109,24 @@ async fn search(State(state): State<HttpState>, Json(args): Json<SearchArgs>) ->
 /// (`KoshaError::NotFound`), distinct from a 5xx service failure — so a caller
 /// can tell "no such document" from "kosha is down". Needs no embedder.
 async fn document(State(state): State<HttpState>, Json(args): Json<DocumentArgs>) -> Response {
+    let source_id = args.source_id.clone();
+    let collections = args.collections.clone();
     match tools::document::handle(&state.pool, args).await {
-        Ok(out) => Json(out).into_response(),
-        Err(e) => ApiError(e).into_response(),
+        Ok(out) => {
+            tracing::info!(
+                route = "/document",
+                source_id,
+                collections = ?collections,
+                format = out.format,
+                content_len = out.content.len(),
+                "document answered"
+            );
+            Json(out).into_response()
+        }
+        Err(e) => {
+            tracing::warn!(route = "/document", source_id, error = %e, "document failed");
+            ApiError(e).into_response()
+        }
     }
 }
 

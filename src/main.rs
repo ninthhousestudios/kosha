@@ -100,6 +100,7 @@ async fn main() -> Result<()> {
     let cfg = Config::from_env();
 
     tracing_subscriber::fmt()
+        .json()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level)),
         )
